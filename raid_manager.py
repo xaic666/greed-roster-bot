@@ -162,9 +162,16 @@ class EditRosterView(discord.ui.View):
         except discord.HTTPException:
             log.exception("Raid roster message refresh failed")
             result += " Saved locally, but the public message could not refresh."
-        for item in self.children:
-            item.disabled = True
-        await i.followup.send(result, ephemeral=True)
+        if updated if 'updated' in locals() else False:
+            # The component interaction's original response is the private editor.
+            # Never delete the public roster board.
+            try:
+                await i.delete_original_response()
+            except discord.HTTPException:
+                log.exception("Could not remove completed private roster editor")
+                await i.followup.send(result, ephemeral=True)
+        else:
+            await i.followup.send(result, ephemeral=True)
 
 
 class RosterView(discord.ui.View):
@@ -231,7 +238,7 @@ def register(bot, guild_id, channel_id):
             await i.followup.send("Roster channel not found.", ephemeral=True)
             return
         if await refresh(bot, i.guild):
-            await i.followup.send("Raid roster refreshed.", ephemeral=True)
+            await i.delete_original_response()
             return
         permissions = channel.permissions_for(i.guild.me)
         if not permissions.view_channel or not permissions.send_messages or not permissions.embed_links:
@@ -256,4 +263,4 @@ def register(bot, guild_id, channel_id):
         data = load()
         data["board"] = {"channel_id": channel.id, "message_id": msg.id}
         save(data)
-        await i.followup.send("Raid roster published.", ephemeral=True)
+        await i.delete_original_response()
