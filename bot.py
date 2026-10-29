@@ -605,7 +605,7 @@ async def setup_hook():
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
 
 
-register_raid_manager(bot, GUILD_ID, CHANNEL_ID)
+register_raid_manager(bot, GUILD_ID, 1552992202966306926)
 bot.setup_hook = setup_hook
 if not TOKEN or TOKEN == 'replace_with_your_bot_token':
     raise RuntimeError('Set DISCORD_TOKEN in .env')
