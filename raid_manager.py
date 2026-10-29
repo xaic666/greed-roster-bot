@@ -59,7 +59,6 @@ def board_embed(guild):
                 chunk = ""
             chunk += line + "\n"
         if chunk: embed.add_field(name=f"{guild_emoji(guild, role)} {role}", value=chunk, inline=False)
-    embed.set_footer(text="Administrator permission required to edit | No Discord roles are changed")
     return embed
 
 async def refresh_setup_preview(bot, guild):
