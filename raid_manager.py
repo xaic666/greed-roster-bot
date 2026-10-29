@@ -155,8 +155,26 @@ def register(bot, guild_id, channel_id):
         if await refresh(bot, i.guild):
             await i.followup.send("Raid roster refreshed.", ephemeral=True)
             return
-        msg = await channel.send(embed=board_embed(i.guild), view=RosterView(bot),
-            allowed_mentions=discord.AllowedMentions.none())
+        permissions = channel.permissions_for(i.guild.me)
+        if not permissions.view_channel or not permissions.send_messages or not permissions.embed_links:
+            missing = [name for name, ok in (
+                ("View Channel", permissions.view_channel),
+                ("Send Messages", permissions.send_messages),
+                ("Embed Links", permissions.embed_links)) if not ok]
+            await i.followup.send(
+                f"Cannot publish to <#{channel.id}>. Missing bot permissions: {', '.join(missing)}. "
+                "Check channel and category overrides for the bot role.", ephemeral=True)
+            return
+        try:
+            msg = await channel.send(embed=board_embed(i.guild), view=RosterView(bot),
+                allowed_mentions=discord.AllowedMentions.none())
+        except discord.Forbidden as exc:
+            await i.followup.send(
+                f"Discord denied access to <#{channel.id}> (HTTP {exc.status}, code {exc.code}). "
+                "Verify this is the intended channel, and give the bot View Channel, Send Messages, "
+                "Embed Links and Read Message History. Category overrides may also apply.",
+                ephemeral=True)
+            return
         data = load()
         data["board"] = {"channel_id": channel.id, "message_id": msg.id}
         save(data)
