@@ -1,0 +1,57 @@
+{
+  "guild_ranks": {
+    "Raider": [
+      "Admin Officer",
+      "GM",
+      "Officer",
+      "Raider"
+    ],
+    "Recruit": [
+      "Trial"
+    ],
+    "Social": [
+      "Nuggie Thief"
+    ]
+  },
+  "combat_roles": {
+    "Tank": [
+      "Tank"
+    ],
+    "Healer": [
+      "Healer"
+    ],
+    "DPS": [
+      "Damage"
+    ]
+  },
+  "classes": {
+    "Warrior": [
+      "Warrior"
+    ],
+    "Paladin": [
+      "Paladin"
+    ],
+    "Hunter": [
+      "Hunter"
+    ],
+    "Rogue": [
+      "Rogue"
+    ],
+    "Priest": [
+      "Priest"
+    ],
+    "Shaman": [
+      "Shaman"
+    ],
+    "Mage": [
+      "Mage"
+    ],
+    "Warlock": [
+      "Warlock"
+    ],
+    "Druid": [
+      "Druid"
+    ]
+  },
+  "refresh_delay_seconds": 5
+}

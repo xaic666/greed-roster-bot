@@ -1,0 +1,18 @@
+@"
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+"@ | Out-File -Encoding utf8 .gitignore
