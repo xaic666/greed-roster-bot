@@ -1,6 +1,5 @@
-
 @echo off
-title Greed Roster Bot Maintenance Toggle
+title Greed Roster Bot Maintenance Control
 
 fltmc >nul 2>&1
 if errorlevel 1 (
@@ -9,7 +8,4 @@ if errorlevel 1 (
     exit /b
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Greed_Bot_Toggle.ps1"
-
-echo.
-pause
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Greed_Bot_toggle.ps1"
