@@ -16,7 +16,7 @@ def load():
     try:
         return json.loads(FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
-        return {"players": {}, "board": None}
+        return {"players": {}, "board": None, "control": None}
 
 def save(data):
     tmp = FILE.with_suffix(".tmp")
@@ -75,7 +75,7 @@ async def refresh(bot, guild):
         save(data)
         return False
     if msg.author.id != bot.user.id: return False
-    await msg.edit(embed=board_embed(guild), attachments=[], view=RosterView(bot),
+    await msg.edit(embed=board_embed(guild), attachments=[], view=None,
         allowed_mentions=discord.AllowedMentions.none())
     return True
 
@@ -225,7 +225,26 @@ class RosterView(discord.ui.View):
             log.exception("Roster refresh failed")
             await i.followup.send("Roster refresh failed. Check bot logs.", ephemeral=True)
 
-def register(bot, guild_id, channel_id):
+async def ensure_control(bot, guild, setup_id):
+    channel = guild.get_channel(setup_id)
+    if not isinstance(channel, discord.TextChannel):
+        raise RuntimeError("Setup channel not found")
+    data = load()
+    state = data.get("control")
+    if state and state.get("channel_id") == setup_id:
+        try:
+            message = await channel.fetch_message(state["message_id"])
+            if message.author.id == bot.user.id:
+                await message.edit(content="**Greed | Raid Roster Setup**", view=RosterView(bot))
+                return
+        except discord.NotFound:
+            pass
+    message = await channel.send("**Greed | Raid Roster Setup**", view=RosterView(bot))
+    data = load()
+    data["control"] = {"channel_id": setup_id, "message_id": message.id}
+    save(data)
+
+def register(bot, guild_id, channel_id, setup_id):
     bot.add_view(RosterView(bot))
 
     @bot.tree.command(name="raid_roster", description="Publish or refresh the editable raid roster", guild=discord.Object(id=guild_id))
@@ -253,6 +272,7 @@ def register(bot, guild_id, channel_id):
             await i.followup.send("Roster channel not found.", ephemeral=True)
             return
         if await refresh(bot, i.guild):
+            await ensure_control(bot, i.guild, setup_id)
             await i.delete_original_response()
             return
         permissions = channel.permissions_for(i.guild.me)
@@ -266,7 +286,7 @@ def register(bot, guild_id, channel_id):
                 "Check channel and category overrides for the bot role.", ephemeral=True)
             return
         try:
-            msg = await channel.send(embed=board_embed(i.guild), view=RosterView(bot),
+            msg = await channel.send(embed=board_embed(i.guild),
                 allowed_mentions=discord.AllowedMentions.none())
         except discord.Forbidden as exc:
             await i.followup.send(
@@ -278,4 +298,5 @@ def register(bot, guild_id, channel_id):
         data = load()
         data["board"] = {"channel_id": channel.id, "message_id": msg.id}
         save(data)
+        await ensure_control(bot, i.guild, setup_id)
         await i.delete_original_response()
