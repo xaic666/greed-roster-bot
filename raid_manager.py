@@ -29,13 +29,13 @@ def permitted(i):
 def board_embed(guild):
     data = load()["players"]
     counts = {role: sum(v["main"] == role for v in data.values()) for role in ROLES}
-    off_tanks = sum(v["off"] == "Tank" for v in data.values())
+    off_tanks = sum(v.get("designated_off_tank", False) for v in data.values())
     embed = discord.Embed(title="⚔️ Greed | Confirmed Raid Roster",
         description=f"**{len(data)}/{TARGET} Raiders** | 🛡️ {counts['Tank']} Tank | 💚 {counts['Healer']} Healer | ⚔️ {counts['DPS']} DPS\n**Designated Off-Tanks:** {off_tanks}",
         color=0xC7A35B)
     for role in ROLES:
         entries = sorted(((int(uid), p) for uid, p in data.items() if p["main"] == role), key=lambda x: x[0])
-        lines = [f"<@{uid}> | {p['class']} | off-spec: {p['off']}" for uid, p in entries]
+        lines = [f"<@{uid}> | {p['class']} | off-spec: {p['off']}" + (" | 🛡️ **Designated OT**" if p.get("designated_off_tank", False) else "") for uid, p in entries]
         if not lines: lines = ["*Open*"]
         # Split field values to respect Discord's 1024-char limit.
         chunk = ""
@@ -106,11 +106,25 @@ class EditRosterView(discord.ui.View):
         self.clazz = None
         self.main = None
         self.off = "None"
+        self.designated_off_tank = False
         self.add_item(MemberPicker())
         if not removing:
             self.add_item(FieldPicker("clazz", "Select class", CLASSES, 1))
             self.add_item(FieldPicker("main", "Select main role", ROLES, 2))
             self.add_item(FieldPicker("off", "Select off-spec (optional)", ("None", *ROLES), 3))
+
+    @discord.ui.button(label="Designated Off-Tank: NO", style=discord.ButtonStyle.secondary, row=4)
+    async def toggle_off_tank(self, i, button):
+        if not permitted(i):
+            await i.response.send_message("Administrators only.", ephemeral=True)
+            return
+        if self.removing:
+            await i.response.send_message("Not applicable when removing a player.", ephemeral=True)
+            return
+        self.designated_off_tank = not self.designated_off_tank
+        button.label = "Designated Off-Tank: YES" if self.designated_off_tank else "Designated Off-Tank: NO"
+        button.style = discord.ButtonStyle.success if self.designated_off_tank else discord.ButtonStyle.secondary
+        await i.response.edit_message(view=self)
 
     @discord.ui.button(label="Save / Confirm",
                        style=discord.ButtonStyle.success, row=4)
@@ -124,6 +138,9 @@ class EditRosterView(discord.ui.View):
         if not self.removing and (self.clazz is None or self.main is None):
             await i.response.send_message("Select a class and main role.", ephemeral=True)
             return
+        if not self.removing and self.designated_off_tank and (self.main != "DPS" or self.off != "Tank"):
+            await i.response.send_message("Designated Off-Tank requires main role DPS and Tank off-spec.", ephemeral=True)
+            return
         if not self.removing and self.main == self.off:
             await i.response.send_message("Off-spec must differ from the main role.", ephemeral=True)
             return
@@ -134,7 +151,8 @@ class EditRosterView(discord.ui.View):
             existed = data["players"].pop(uid, None) is not None
             result = "Removed." if existed else "Member was not on the roster."
         else:
-            data["players"][uid] = {"class": self.clazz, "main": self.main, "off": self.off}
+            data["players"][uid] = {"class": self.clazz, "main": self.main, "off": self.off,
+                                    "designated_off_tank": self.designated_off_tank}
             result = "Roster entry saved."
         save(data)
         try:
@@ -193,7 +211,7 @@ def register(bot, guild_id, channel_id):
     @app_commands.guild_only()
     async def raid_roster(i):
         if i.guild_id != guild_id or not permitted(i):
-            await i.response.send_message("Manage Server permission required.", ephemeral=True)
+            await i.response.send_message("Administrator permission required.", ephemeral=True)
             return
         started = time.monotonic()
         log.info("raid_roster invoked: guild=%s channel=%s bot_latency=%.3fs",
