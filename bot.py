@@ -31,7 +31,7 @@ def required_int(name):
 TOKEN = os.environ.get('DISCORD_TOKEN', '')
 GUILD_ID = required_int('GUILD_ID')
 CHANNEL_ID = required_int('ROSTER_CHANNEL_ID')
-RAID_CHANNEL_ID = int(os.environ.get('RAID_ROSTER_CHANNEL_ID', '1552992202966306926'))
+RAID_CHANNEL_ID = int(os.environ.get('RAID_ROSTER_CHANNEL_ID', '1552992208850919465'))
 CONFIG = json.loads((BASE / 'config.json').read_text(encoding='utf-8'))
 STATE_FILE = BASE / 'roster_state.json'
 RANKS = list(CONFIG['guild_ranks'])
