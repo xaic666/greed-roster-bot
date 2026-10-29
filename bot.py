@@ -13,6 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+from raid_manager import register as register_raid_manager
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env')
@@ -604,6 +605,7 @@ async def setup_hook():
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
 
 
+register_raid_manager(bot, GUILD_ID, CHANNEL_ID)
 bot.setup_hook = setup_hook
 if not TOKEN or TOKEN == 'replace_with_your_bot_token':
     raise RuntimeError('Set DISCORD_TOKEN in .env')
