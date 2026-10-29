@@ -36,7 +36,11 @@ def board_embed(guild):
     counts = {role: sum(v["main"] == role for v in data.values()) for role in ROLES}
     off_tanks = sum(v.get("designated_off_tank", False) for v in data.values())
     embed = discord.Embed(title="⚔️ Greed | Confirmed Raid Roster",
-        description=f"**{len(data)}/{TARGET} Raiders** | 🛡️ {counts['Tank']} Tank | 💚 {counts['Healer']} Healer | ⚔️ {counts['DPS']} DPS\n**Designated Off-Tanks:** {off_tanks}",
+        description=(f"**{len(data)}/{TARGET} Raiders**  |  "
+                     f"{guild_emoji(guild, 'tank')} {counts['Tank']} Tank  |  "
+                     f"{guild_emoji(guild, 'healer')} {counts['Healer']} Healer  |  "
+                     f"{guild_emoji(guild, 'dps')} {counts['DPS']} DPS\n"
+                     f"**Designated Off-Tanks:** {off_tanks}"),
         color=0xC7A35B)
     for role in ROLES:
         entries = sorted(((int(uid), p) for uid, p in data.items() if p["main"] == role), key=lambda x: x[0])
@@ -54,7 +58,7 @@ def board_embed(guild):
                 embed.add_field(name=f"{guild_emoji(guild, role)} {role}", value=chunk, inline=False)
                 chunk = ""
             chunk += line + "\n"
-        if chunk: embed.add_field(name=role, value=chunk, inline=False)
+        if chunk: embed.add_field(name=f"{guild_emoji(guild, role)} {role}", value=chunk, inline=False)
     embed.set_footer(text="Administrator permission required to edit | No Discord roles are changed")
     return embed
 
