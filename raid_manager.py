@@ -112,7 +112,7 @@ class EditRosterView(discord.ui.View):
             self.add_item(FieldPicker("main", "Select main role", ROLES, 2))
             self.add_item(FieldPicker("off", "Select off-spec (optional)", ("None", *ROLES), 3))
 
-    @discord.ui.button(label="Confirm removal" if False else "Save / Confirm",
+    @discord.ui.button(label="Save / Confirm",
                        style=discord.ButtonStyle.success, row=4)
     async def submit(self, i, button):
         if not permitted(i):
