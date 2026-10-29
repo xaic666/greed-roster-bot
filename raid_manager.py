@@ -1,9 +1,12 @@
 """Manually managed raid roster, independent of the guild-role roster."""
 import json
+import logging
+import time
 from pathlib import Path
 import discord
 from discord import app_commands
 
+log = logging.getLogger("greed-raid-manager")
 FILE = Path(__file__).with_name("raid_players.json")
 CLASSES = ("Warrior","Paladin","Hunter","Rogue","Priest","Shaman","Mage","Warlock","Druid")
 ROLES = ("Tank","Healer","DPS")
@@ -147,7 +150,19 @@ def register(bot, guild_id, channel_id):
         if i.guild_id != guild_id or not permitted(i):
             await i.response.send_message("Manage Server permission required.", ephemeral=True)
             return
-        await i.response.defer(ephemeral=True)
+        started = time.monotonic()
+        log.info("raid_roster invoked: guild=%s channel=%s bot_latency=%.3fs",
+                 i.guild_id, channel_id, bot.latency)
+        try:
+            await i.response.defer(ephemeral=True)
+        except discord.NotFound:
+            log.exception("raid_roster interaction expired before acknowledgement (%.2fs elapsed; bot latency %.3fs). "
+                          "Check network delays, clock synchronization and duplicate bot processes.",
+                          time.monotonic() - started, bot.latency)
+            return
+        except discord.HTTPException:
+            log.exception("raid_roster acknowledgement failed")
+            return
         channel = i.guild.get_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
             await i.followup.send("Roster channel not found.", ephemeral=True)
