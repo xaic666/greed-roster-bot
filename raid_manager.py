@@ -229,6 +229,9 @@ async def ensure_control(bot, guild, setup_id):
     channel = guild.get_channel(setup_id)
     if not isinstance(channel, discord.TextChannel):
         raise RuntimeError("Setup channel not found")
+    perms = channel.permissions_for(guild.me)
+    if not (perms.view_channel and perms.send_messages and perms.read_message_history):
+        raise RuntimeError("Bot lacks View Channel, Send Messages or Read Message History in setup channel")
     data = load()
     state = data.get("control")
     if state and state.get("channel_id") == setup_id:
@@ -272,7 +275,12 @@ def register(bot, guild_id, channel_id, setup_id):
             await i.followup.send("Roster channel not found.", ephemeral=True)
             return
         if await refresh(bot, i.guild):
-            await ensure_control(bot, i.guild, setup_id)
+            try:
+                await ensure_control(bot, i.guild, setup_id)
+            except (discord.HTTPException, RuntimeError) as exc:
+                log.exception("Setup panel publish failed")
+                await i.followup.send(f"Public roster updated, but setup panel failed: {exc}", ephemeral=True)
+                return
             await i.delete_original_response()
             return
         permissions = channel.permissions_for(i.guild.me)
@@ -298,5 +306,10 @@ def register(bot, guild_id, channel_id, setup_id):
         data = load()
         data["board"] = {"channel_id": channel.id, "message_id": msg.id}
         save(data)
-        await ensure_control(bot, i.guild, setup_id)
+        try:
+            await ensure_control(bot, i.guild, setup_id)
+        except (discord.HTTPException, RuntimeError) as exc:
+            log.exception("Setup panel publish failed")
+            await i.followup.send(f"Public roster created, but setup panel failed: {exc}", ephemeral=True)
+            return
         await i.delete_original_response()
