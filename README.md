@@ -43,3 +43,29 @@ The bot creates and edits one consolidated roster embed in the configured channe
 
 ### Roster emojis
 The panel uses Unicode emojis for classes, combat roles, and guild ranks. Discord renders these without custom server emoji permissions. To change them, edit `class_icons`, `combat_icons`, or `rank_icons` in `make_pages()` within `bot.py`. Official WoW class icons would require custom Discord emoji assets instead.
+
+
+## Officer-managed raid roster
+
+In addition to the existing automatic guild-role panels, the bot now supports a **separate confirmed raid roster**.
+
+1. Restart the bot after pulling changes.
+2. In Discord, run `/raid_roster` (requires **Manage Server**) to publish the editable roster in the configured roster channel.
+3. Use **Add / Edit**, **Remove**, and **Refresh** buttons below the roster embed.
+4. For Add / Edit, enter a member's Discord ID or mention, WoW class, main role (Tank, Healer, DPS), and optional off-spec (Tank, Healer, DPS, None).
+
+The raid roster begins empty. Officers add confirmed Raiders manually. Discord guild ranks and combat roles are **not** modified by this feature. Existing automatic Tank/Healer/DPS guild panels remain intact.
+
+The file `raid_players.json` stores assignments and the raid roster message ID locally, persists across restarts, and is excluded from Git. Keep it when migrating the bot. Back it up periodically, and run only one copy of the bot.
+
+The bot needs **Send Messages, Embed Links, View Channel, and Read Message History** in the roster channel. The roster commands require the **Manage Server** permission. Existing role mapping settings remain available via `/settings`.
+
+**Deployment to the Windows host:**
+
+```powershell
+cd "C:\Users\xaic6\Desktop\greed-roster-bot\greed-roster-bot"
+git pull origin main
+# Restart your existing bot using your normal startup method.
+```
+
+Do not run a second instance alongside the old bot.
