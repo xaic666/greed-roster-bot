@@ -26,6 +26,11 @@ def save(data):
 def permitted(i):
     return isinstance(i.user, discord.Member) and i.user.guild_permissions.administrator
 
+def guild_emoji(guild, name):
+    """Resolve a custom server emoji by name without hardcoding its ID."""
+    emoji = discord.utils.get(guild.emojis, name=name.lower())
+    return str(emoji) if emoji is not None else ""
+
 def board_embed(guild):
     data = load()["players"]
     counts = {role: sum(v["main"] == role for v in data.values()) for role in ROLES}
@@ -35,13 +40,18 @@ def board_embed(guild):
         color=0xC7A35B)
     for role in ROLES:
         entries = sorted(((int(uid), p) for uid, p in data.items() if p["main"] == role), key=lambda x: x[0])
-        lines = [f"<@{uid}> | {p['class']} | off-spec: {p['off']}" + (" | 🛡️ **Designated OT**" if p.get("designated_off_tank", False) else "") for uid, p in entries]
+        lines = [
+            f"<@{uid}> | {guild_emoji(guild, p['class'])} {p['class']}"
+            + (f" | {guild_emoji(guild, p['off'])} Off-spec: {p['off']}" if p['off'] != "None" else "")
+            + (" | 🛡️ **Designated OT**" if p.get("designated_off_tank", False) else "")
+            for uid, p in entries
+        ]
         if not lines: lines = ["*Open*"]
         # Split field values to respect Discord's 1024-char limit.
         chunk = ""
         for line in lines:
             if len(chunk) + len(line) + 1 > 950:
-                embed.add_field(name=role, value=chunk, inline=False)
+                embed.add_field(name=f"{guild_emoji(guild, role)} {role}", value=chunk, inline=False)
                 chunk = ""
             chunk += line + "\n"
         if chunk: embed.add_field(name=role, value=chunk, inline=False)
