@@ -24,7 +24,7 @@ def save(data):
     tmp.replace(FILE)
 
 def permitted(i):
-    return isinstance(i.user, discord.Member) and i.user.guild_permissions.manage_guild
+    return isinstance(i.user, discord.Member) and i.user.guild_permissions.administrator
 
 def board_embed(guild):
     data = load()["players"]
@@ -45,7 +45,7 @@ def board_embed(guild):
                 chunk = ""
             chunk += line + "\n"
         if chunk: embed.add_field(name=role, value=chunk, inline=False)
-    embed.set_footer(text="Manage Server permission required to edit | No Discord roles are changed")
+    embed.set_footer(text="Administrator permission required to edit | No Discord roles are changed")
     return embed
 
 async def refresh(bot, guild):
@@ -65,52 +65,89 @@ async def refresh(bot, guild):
         allowed_mentions=discord.AllowedMentions.none())
     return True
 
-class RosterModal(discord.ui.Modal):
-    def __init__(self, bot, removing=False):
-        super().__init__(title="Remove Raider" if removing else "Add or Edit Raider")
-        self.bot, self.removing = bot, removing
-        self.player = discord.ui.TextInput(label="Discord user ID or mention", max_length=80)
-        self.add_item(self.player)
-        if not removing:
-            self.clazz = discord.ui.TextInput(label="Class", placeholder="Druid")
-            self.main = discord.ui.TextInput(label="Main role (Tank / Healer / DPS)")
-            self.off = discord.ui.TextInput(label="Off-spec (Tank / Healer / DPS / None)", default="None")
-            for field in (self.clazz, self.main, self.off): self.add_item(field)
+class MemberPicker(discord.ui.UserSelect):
+    def __init__(self):
+        super().__init__(placeholder="Search for a Discord member", min_values=1, max_values=1, row=0)
 
-    async def on_submit(self, i):
+    async def callback(self, i):
         if not permitted(i):
-            await i.response.send_message("Manage Server permission required.", ephemeral=True)
+            await i.response.send_message("Administrators only.", ephemeral=True)
             return
-        uid = str(self.player.value).strip().strip("<@!>")
-        if not uid.isdecimal():
-            await i.response.send_message("Enter a valid Discord user ID or mention.", ephemeral=True)
+        member = self.values[0]
+        if not isinstance(member, discord.Member):
+            await i.response.send_message("Choose a member of this server.", ephemeral=True)
             return
-        uid = int(uid)
-        try:
-            await i.guild.fetch_member(uid)
-        except discord.NotFound:
-            await i.response.send_message("This user is not in the server.", ephemeral=True)
+        self.view.member_id = member.id
+        await i.response.defer()
+
+
+class FieldPicker(discord.ui.Select):
+    def __init__(self, key, label, options, row):
+        super().__init__(
+            placeholder=label, min_values=1, max_values=1, row=row,
+            options=[discord.SelectOption(label=value, value=value) for value in options]
+        )
+        self.field_key = key
+
+    async def callback(self, i):
+        if not permitted(i):
+            await i.response.send_message("Administrators only.", ephemeral=True)
             return
-        entry = None
-        if not self.removing:
-            clazz = next((x for x in CLASSES if x.lower() == str(self.clazz.value).strip().lower()), None)
-            main = next((x for x in ROLES if x.lower() == str(self.main.value).strip().lower()), None)
-            off = next((x for x in (*ROLES,"None") if x.lower() == str(self.off.value).strip().lower()), None)
-            if not clazz or not main or not off or main == off:
-                await i.response.send_message("Invalid class or main/off-spec combination.", ephemeral=True)
-                return
-            entry = {"class": clazz, "main": main, "off": off}
+        setattr(self.view, self.field_key, self.values[0])
+        await i.response.defer()
+
+
+class EditRosterView(discord.ui.View):
+    def __init__(self, bot, removing=False):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.removing = removing
+        self.member_id = None
+        self.clazz = None
+        self.main = None
+        self.off = "None"
+        self.add_item(MemberPicker())
+        if not removing:
+            self.add_item(FieldPicker("clazz", "Select class", CLASSES, 1))
+            self.add_item(FieldPicker("main", "Select main role", ROLES, 2))
+            self.add_item(FieldPicker("off", "Select off-spec (optional)", ("None", *ROLES), 3))
+
+    @discord.ui.button(label="Confirm removal" if False else "Save / Confirm",
+                       style=discord.ButtonStyle.success, row=4)
+    async def submit(self, i, button):
+        if not permitted(i):
+            await i.response.send_message("Administrators only.", ephemeral=True)
+            return
+        if self.member_id is None:
+            await i.response.send_message("Select a Discord member first.", ephemeral=True)
+            return
+        if not self.removing and (self.clazz is None or self.main is None):
+            await i.response.send_message("Select a class and main role.", ephemeral=True)
+            return
+        if not self.removing and self.main == self.off:
+            await i.response.send_message("Off-spec must differ from the main role.", ephemeral=True)
+            return
         await i.response.defer(ephemeral=True)
         data = load()
-        if self.removing: data["players"].pop(str(uid), None)
-        else: data["players"][str(uid)] = entry
+        uid = str(self.member_id)
+        if self.removing:
+            existed = data["players"].pop(uid, None) is not None
+            result = "Removed." if existed else "Member was not on the roster."
+        else:
+            data["players"][uid] = {"class": self.clazz, "main": self.main, "off": self.off}
+            result = "Roster entry saved."
         save(data)
         try:
-            await refresh(self.bot, i.guild)
-            await i.followup.send("Roster saved. " + ("Removed" if self.removing else "Updated") + f" <@{uid}>.",
-                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            updated = await refresh(self.bot, i.guild)
+            if not updated:
+                result += " Run /raid_roster to publish the roster."
         except discord.HTTPException:
-            await i.followup.send("Saved locally, but failed to refresh the public roster. Use /raid_roster.", ephemeral=True)
+            log.exception("Raid roster message refresh failed")
+            result += " Saved locally, but the public message could not refresh."
+        for item in self.children:
+            item.disabled = True
+        await i.followup.send(result, ephemeral=True)
+
 
 class RosterView(discord.ui.View):
     def __init__(self, bot):
@@ -120,31 +157,39 @@ class RosterView(discord.ui.View):
     @discord.ui.button(label="Add / Edit", emoji="✏️", style=discord.ButtonStyle.primary, custom_id="greed:raid:edit")
     async def edit(self, i, button):
         if not permitted(i):
-            await i.response.send_message("Officers only.", ephemeral=True)
+            await i.response.send_message("Administrators only.", ephemeral=True)
             return
-        await i.response.send_modal(RosterModal(self.bot))
+        await i.response.send_message(
+            "Choose a guild member, class, main role and optional off-spec, then click **Save / Confirm**.",
+            view=EditRosterView(self.bot), ephemeral=True)
 
     @discord.ui.button(label="Remove", emoji="🗑️", style=discord.ButtonStyle.secondary, custom_id="greed:raid:remove")
     async def remove(self, i, button):
         if not permitted(i):
-            await i.response.send_message("Officers only.", ephemeral=True)
+            await i.response.send_message("Administrators only.", ephemeral=True)
             return
-        await i.response.send_modal(RosterModal(self.bot, removing=True))
+        await i.response.send_message(
+            "Select the member to remove, then click **Save / Confirm**.",
+            view=EditRosterView(self.bot, removing=True), ephemeral=True)
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, custom_id="greed:raid:refresh")
     async def reload(self, i, button):
         if not permitted(i):
-            await i.response.send_message("Officers only.", ephemeral=True)
+            await i.response.send_message("Administrators only.", ephemeral=True)
             return
         await i.response.defer(ephemeral=True)
-        await refresh(self.bot, i.guild)
-        await i.followup.send("Roster refreshed.", ephemeral=True)
+        try:
+            updated = await refresh(self.bot, i.guild)
+            await i.followup.send("Roster refreshed." if updated else "Use /raid_roster to publish.", ephemeral=True)
+        except discord.HTTPException:
+            log.exception("Roster refresh failed")
+            await i.followup.send("Roster refresh failed. Check bot logs.", ephemeral=True)
 
 def register(bot, guild_id, channel_id):
     bot.add_view(RosterView(bot))
 
     @bot.tree.command(name="raid_roster", description="Publish or refresh the editable raid roster", guild=discord.Object(id=guild_id))
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
     async def raid_roster(i):
         if i.guild_id != guild_id or not permitted(i):
