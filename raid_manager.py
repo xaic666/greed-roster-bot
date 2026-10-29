@@ -155,6 +155,7 @@ class EditRosterView(discord.ui.View):
                                     "designated_off_tank": self.designated_off_tank}
             result = "Roster entry saved."
         save(data)
+        updated = False
         try:
             updated = await refresh(self.bot, i.guild)
             if not updated:
@@ -162,7 +163,7 @@ class EditRosterView(discord.ui.View):
         except discord.HTTPException:
             log.exception("Raid roster message refresh failed")
             result += " Saved locally, but the public message could not refresh."
-        if updated if 'updated' in locals() else False:
+        if updated:
             # The component interaction's original response is the private editor.
             # Never delete the public roster board.
             try:
