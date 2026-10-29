@@ -152,8 +152,8 @@ class EditRosterView(discord.ui.View):
         if not self.removing and (self.clazz is None or self.main is None):
             await i.response.send_message("Select a class and main role.", ephemeral=True)
             return
-        if not self.removing and self.designated_off_tank and (self.main != "DPS" or self.off != "Tank"):
-            await i.response.send_message("Designated Off-Tank requires main role DPS and Tank off-spec.", ephemeral=True)
+        if not self.removing and self.designated_off_tank and (self.main not in ("DPS", "Healer") or self.off != "Tank"):
+            await i.response.send_message("Designated Off-Tank requires DPS or Healer main role with Tank off-spec.", ephemeral=True)
             return
         if not self.removing and self.main == self.off:
             await i.response.send_message("Off-spec must differ from the main role.", ephemeral=True)
