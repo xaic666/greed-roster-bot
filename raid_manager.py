@@ -62,6 +62,29 @@ def board_embed(guild):
     embed.set_footer(text="Administrator permission required to edit | No Discord roles are changed")
     return embed
 
+async def refresh_setup_preview(bot, guild):
+    """Mirror the public roster into the private admin control message."""
+    state = load().get("control")
+    if not state:
+        return
+    channel = guild.get_channel(state["channel_id"])
+    if not isinstance(channel, discord.TextChannel):
+        return
+    try:
+        message = await channel.fetch_message(state["message_id"])
+        if message.author.id == bot.user.id:
+            await message.edit(
+                content="**⚙️ Greed | Raid Roster Setup (Live Preview)**",
+                embed=board_embed(guild),
+                view=RosterView(bot),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+    except discord.NotFound:
+        log.warning("Saved setup preview message was deleted; run /raid_roster to recreate it")
+    except discord.HTTPException:
+        log.exception("Could not refresh private setup preview")
+
+
 async def refresh(bot, guild):
     data = load()
     board = data.get("board")
@@ -77,6 +100,7 @@ async def refresh(bot, guild):
     if msg.author.id != bot.user.id: return False
     await msg.edit(embed=board_embed(guild), attachments=[], view=None,
         allowed_mentions=discord.AllowedMentions.none())
+    await refresh_setup_preview(bot, guild)
     return True
 
 class MemberPicker(discord.ui.UserSelect):
@@ -238,11 +262,11 @@ async def ensure_control(bot, guild, setup_id):
         try:
             message = await channel.fetch_message(state["message_id"])
             if message.author.id == bot.user.id:
-                await message.edit(content="**Greed | Raid Roster Setup**", view=RosterView(bot))
+                await message.edit(content="**⚙️ Greed | Raid Roster Setup (Live Preview)**", embed=board_embed(guild), view=RosterView(bot))
                 return
         except discord.NotFound:
             pass
-    message = await channel.send("**Greed | Raid Roster Setup**", view=RosterView(bot))
+    message = await channel.send("**⚙️ Greed | Raid Roster Setup (Live Preview)**", embed=board_embed(guild), view=RosterView(bot), allowed_mentions=discord.AllowedMentions.none())
     data = load()
     data["control"] = {"channel_id": setup_id, "message_id": message.id}
     save(data)
