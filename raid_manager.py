@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 import discord
 from discord import app_commands
+from raid_render import render as render_raid_image
 
 log = logging.getLogger("greed-raid-manager")
 FILE = Path(__file__).with_name("raid_players.json")
@@ -55,6 +56,7 @@ def board_embed(guild):
                 chunk = ""
             chunk += line + "\n"
         if chunk: embed.add_field(name=role, value=chunk, inline=False)
+    embed.set_image(url="attachment://greed-raid-roster.png")
     embed.set_footer(text="Administrator permission required to edit | No Discord roles are changed")
     return embed
 
@@ -71,7 +73,8 @@ async def refresh(bot, guild):
         save(data)
         return False
     if msg.author.id != bot.user.id: return False
-    await msg.edit(embed=board_embed(guild), view=RosterView(bot),
+    picture = discord.File(render_raid_image(data["players"], guild), filename="greed-raid-roster.png")
+    await msg.edit(embed=board_embed(guild), attachments=[picture], view=RosterView(bot),
         allowed_mentions=discord.AllowedMentions.none())
     return True
 
@@ -262,7 +265,8 @@ def register(bot, guild_id, channel_id):
                 "Check channel and category overrides for the bot role.", ephemeral=True)
             return
         try:
-            msg = await channel.send(embed=board_embed(i.guild), view=RosterView(bot),
+            picture = discord.File(render_raid_image(load()["players"], i.guild), filename="greed-raid-roster.png")
+            msg = await channel.send(embed=board_embed(i.guild), file=picture, view=RosterView(bot),
                 allowed_mentions=discord.AllowedMentions.none())
         except discord.Forbidden as exc:
             await i.followup.send(
