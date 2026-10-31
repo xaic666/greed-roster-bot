@@ -13,7 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
-from raid_manager import register as register_raid_manager
+from raid_manager import register as register_raid_manager, register_views as register_raid_views, ensure_control as ensure_raid_control
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / '.env')
@@ -424,6 +424,15 @@ async def on_ready():
         await update_roster()
     except Exception:
         log.exception('Startup roster update failed')
+    # Refresh the saved admin message and attach a live view to this exact message.
+    # A missing/forbidden setup channel must not prevent the rest of the bot running.
+    guild = bot.get_guild(GUILD_ID)
+    if guild is not None:
+        try:
+            await ensure_raid_control(bot, guild, SETUP_CHANNEL_ID)
+            log.info('Raid setup controls verified on startup')
+        except (discord.HTTPException, RuntimeError, KeyError, ValueError):
+            log.exception('Raid setup controls could not be restored')
 
 
 @bot.event
@@ -637,6 +646,7 @@ async def roster_refresh(interaction: discord.Interaction):
 
 
 async def setup_hook():
+    register_raid_views(bot)
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
 
 
