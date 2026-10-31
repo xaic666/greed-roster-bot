@@ -357,6 +357,7 @@ class RosterView(PublicRosterView):
 
     @discord.ui.button(label="Add / Edit", emoji="✏️", style=discord.ButtonStyle.primary, custom_id="greed:raid:edit", row=2)
     async def edit(self, i, button):
+        log.info("Raid Add/Edit clicked: user=%s interaction=%s guild=%s latency=%.3fs", i.user.id, i.id, i.guild_id, self.bot.latency)
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
             return
@@ -366,6 +367,7 @@ class RosterView(PublicRosterView):
 
     @discord.ui.button(label="Remove", emoji="🗑️", style=discord.ButtonStyle.secondary, custom_id="greed:raid:remove", row=2)
     async def remove(self, i, button):
+        log.info("Raid Remove clicked: user=%s interaction=%s guild=%s latency=%.3fs", i.user.id, i.id, i.guild_id, self.bot.latency)
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
             return
@@ -375,6 +377,7 @@ class RosterView(PublicRosterView):
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, custom_id="greed:raid:refresh", row=2)
     async def reload(self, i, button):
+        log.info("Raid Refresh clicked: user=%s interaction=%s guild=%s latency=%.3fs", i.user.id, i.id, i.guild_id, self.bot.latency)
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
             return
