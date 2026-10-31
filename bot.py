@@ -136,6 +136,20 @@ def class_icon(guild, clazz):
     emoji = discord.utils.get(guild.emojis, name=clazz.lower())
     return str(emoji) if emoji else CLASS_ICONS.get(clazz, "⚔️")
 
+def roster_role_mention(guild, section, key):
+    """Display the configured Discord role in its native server color.
+
+    Prefer an exact role name, since categories such as Raider can map to
+    several roles (Admin Officer, GM, Officer, Raider).
+    """
+    aliases = CONFIG.get(section, {}).get(key, [])
+    candidates = [key] + [name for name in aliases if name.casefold() != key.casefold()]
+    for name in candidates:
+        role = discord.utils.get(guild.roles, name=name)
+        if role is not None and not role.is_default():
+            return role.mention
+    return key
+
 
 def chunk_lines(lines, limit=900):
     """Split on line boundaries to stay comfortably below Discord's 1024-char field limit."""
@@ -181,10 +195,10 @@ def render_panels(roster, totals, issues, guild):
             for rank in RANKS:
                 players = sorted(ranks.get(rank, []), key=lambda m: m.display_name.casefold())
                 if players:
-                    lines.append(f"{RANK_MARKERS.get(rank, '⚪')} **{rank}**")
+                    lines.append(f"**{roster_role_mention(guild, 'guild_ranks', rank)}**")
                     lines.extend(f"• <@{member.id}>" for member in players)
             for index, chunk in enumerate(chunk_lines(lines)):
-                name = f"{CLASS_COLOR_MARKERS.get(clazz, '⚪')} {class_icon(guild, clazz)} {clazz} ({class_count})"
+                name = f"{class_icon(guild, clazz)} {roster_role_mention(guild, 'classes', clazz)} ({class_count})"
                 if index:
                     name += f" ({index + 1})"
                 fields.append((name, chunk))
