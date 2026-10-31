@@ -1,14 +1,11 @@
 """Greed live roster: read-only Discord role aggregation, split into Tank/Healer/DPS panels."""
 import asyncio
-import io
-import sys
 import json
 import logging
 import os
 from collections import defaultdict
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -113,197 +110,123 @@ def describe_issue(rank_matches, class_matches, combat_matches):
     return '; '.join(problems) if problems else 'check configuration'
 
 
-def _font_candidates(size, bold=False):
-    if sys.platform == 'win32':
-        if bold:
-            return [
-                r'C:\Windows\Fonts\segoeuib.ttf',
-                r'C:\Windows\Fonts\arialbd.ttf',
-            ]
-        return [
-            r'C:\Windows\Fonts\segoeui.ttf',
-            r'C:\Windows\Fonts\arial.ttf',
-            r'C:\Windows\Fonts\tahoma.ttf',
-        ]
-    return [
-        '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf' if bold else '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' if bold else '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-    ]
+# Discord-native roster embeds. Three inline class fields per row on desktop.
+# These replace the old Pillow screenshots without changing role classifications.
+CLASS_ICONS = {
+    "Warrior": "⚔️", "Paladin": "🔆", "Hunter": "🏹",
+    "Rogue": "🗡️", "Priest": "✨", "Shaman": "⚡",
+    "Mage": "🔮", "Warlock": "🔥", "Druid": "🌿",
+}
+ROLE_ICONS = {"Tank": "🛡️", "Healer": "💚", "DPS": "⚔️"}
+ROLE_EMBED_COLORS = {"Tank": 0x528CC4, "Healer": 0x54A878, "DPS": 0xC7A35B}
 
 
-def font(size, bold=False):
-    for name in _font_candidates(size, bold=bold):
-        try:
-            return ImageFont.truetype(name, size)
-        except OSError:
-            pass
-    return ImageFont.load_default()
+def class_icon(guild, clazz):
+    # Prefer a server's existing class emoji, just like Raid-Helper.
+    emoji = discord.utils.get(guild.emojis, name=clazz.lower())
+    return str(emoji) if emoji else CLASS_ICONS.get(clazz, "⚔️")
 
 
-def _measure(draw, text, use_font):
-    left, top, right, bottom = draw.textbbox((0, 0), text, font=use_font)
-    return right - left, bottom - top
+def chunk_lines(lines, limit=900):
+    """Split on line boundaries to stay comfortably below Discord's 1024-char field limit."""
+    chunks = []
+    current = []
+    length = 0
+    for line in lines:
+        # Discord names are capped at 32 chars, but issue descriptions can be longer.
+        if len(line) > limit:
+            line = line[:limit - 1] + "…"
+        if current and length + len(line) + 1 > limit:
+            chunks.append("\n".join(current))
+            current = []
+            length = 0
+        current.append(line)
+        length += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
 
 
-def wrap_text(draw, value, max_width, use_font):
-    if not value or value == '—':
-        return ['—']
-    items = value.split(', ')
-    lines = []
-    line = ''
-    for item in items:
-        item = item.strip()
-        while item and _measure(draw, item, use_font)[0] > max_width:
-            item = item[:-2] + '…'
-        proposed = f'{line}, {item}' if line else item
-        if line and _measure(draw, proposed, use_font)[0] > max_width:
-            lines.append(line)
-            line = item
-        else:
-            line = proposed
-    if line:
-        lines.append(line)
-    return lines or ['—']
-
-
-def render_role_panel(roster, totals, issues, combat_role, panel_index, panel_count):
-    regular = font(28)
-    bold = font(29, True)
-    heading = font(42, True)
-    small = font(21)
-
-    # Fixed readable size; one panel per combat role.
-    columns = [('CLASS', 165), ('RAIDER', 235), ('RECRUIT', 245), ('SOCIAL', 235)]
-    padding = 22
-    width = sum(w for _, w in columns) + padding * 2
-
-    test = Image.new('RGB', (width, 200), '#111827')
-    measure = ImageDraw.Draw(test)
-
-    rows = []
-    for clazz in CLASSES:
-        ranks = roster.get(clazz, {}).get(combat_role, {})
-        if not any(ranks.values()):
-            continue
-        cell_values = []
-        for rank in RANKS:
-            players = sorted(ranks.get(rank, []), key=lambda m: m.display_name.casefold())
-            cell_values.append(', '.join(short_name(m) for m in players) or '—')
-        wrapped = [wrap_text(measure, value, columns[i + 1][1] - 18, regular)
-                   for i, value in enumerate(cell_values)]
-        line_count = max(len(lines) for lines in wrapped) if wrapped else 1
-        row_height = max(58, 16 + 32 * line_count)
-        rows.append((clazz, wrapped, row_height))
-
-    header_height = 165
-    table_header_h = 48
-    body_height = sum(r[2] for r in rows) if rows else 60
-
-    issue_entries = []
-    if panel_index == panel_count - 1 and issues:
-        for member, rank_matches, class_matches, combat_matches in sorted(issues, key=lambda x: x[0].display_name.casefold()):
-            issue_entries.append(f'{short_name(member)}: {describe_issue(rank_matches, class_matches, combat_matches)}')
-
-    wrapped_issues = []
-    issue_area_height = 0
-    if issue_entries:
-        issue_wrap_font = small
-        max_issue_width = width - padding * 2 - 12
-        for text in issue_entries:
-            # wrap based on words this time, to keep diagnostics readable
-            words = text.split(' ')
-            line = ''
-            lines = []
-            for word in words:
-                proposed = f'{line} {word}'.strip()
-                if line and _measure(measure, proposed, issue_wrap_font)[0] > max_issue_width:
-                    lines.append(line)
-                    line = word
-                else:
-                    line = proposed
-            if line:
-                lines.append(line)
-            wrapped_issues.append(lines)
-        issue_area_height = 52 + sum(28 * len(lines) + 8 for lines in wrapped_issues)
-
-    height = header_height + table_header_h + body_height + issue_area_height + 28
-    image = Image.new('RGB', (width, height), '#111827')
-    d = ImageDraw.Draw(image)
-
-    y = 18
-    d.text((padding, y), f'GREED | {combat_role.upper()} ROSTER', fill='#F1E6CA', font=heading)
-    y += 52
+def render_panels(roster, totals, issues, guild):
+    """Return native Discord embeds, grouped by combat role then class."""
     total_members = sum(totals.get(rank, 0) for rank in RANKS)
-    summary = f'{total_members} members  |  {totals["Tank"]} tanks  |  {totals["Healer"]} healers  |  {totals["DPS"]} DPS'
-    d.text((padding, y), summary, fill='#E5E7EB', font=bold)
-    y += 35
-    role_total = totals.get(combat_role, 0)
-    sub = f'{combat_role}: {role_total} total  |  Raiders {totals.get("Raider", 0)}  |  Recruits {totals.get("Recruit", 0)}  |  Socials {totals.get("Social", 0)}'
-    d.text((padding, y), sub, fill=ROLE_COLORS.get(combat_role, '#B8C0CF'), font=small)
-    y += 42
-
-    x = padding
-    for label, col_width in columns:
-        d.rectangle((x, y, x + col_width, y + table_header_h), fill='#2B3445')
-        d.text((x + 10, y + 10), label, fill='#F9FAFB', font=small)
-        x += col_width
-    y += table_header_h
-
-    if rows:
-        for row_idx, (clazz, wrapped, row_height) in enumerate(rows):
-            bg = '#1A2231' if row_idx % 2 == 0 else '#151C29'
-            d.rectangle((padding, y, width - padding, y + row_height), fill=bg)
-            x = padding
-            for col_idx, (_, col_width) in enumerate(columns):
-                if col_idx == 0:
-                    d.text((x + 10, y + 12), clazz, fill=CLASS_COLORS.get(clazz, '#FFFFFF'), font=bold)
-                else:
-                    lines = wrapped[col_idx - 1]
-                    for line_idx, line in enumerate(lines):
-                        fill = '#E5E7EB' if line != '—' else '#667085'
-                        d.text((x + 10, y + 9 + line_idx * 30), line, fill=fill, font=regular)
-                x += col_width
-                d.line((x, y, x, y + row_height), fill='#314056', width=1)
-            d.line((padding, y + row_height, width - padding, y + row_height), fill='#314056', width=1)
-            y += row_height
-    else:
-        d.rectangle((padding, y, width - padding, y + 60), fill='#1A2231')
-        d.text((padding + 10, y + 16), f'No {combat_role.lower()}s classified yet.', fill='#E5E7EB', font=regular)
-        y += 60
-
-    if wrapped_issues:
-        y += 12
-        d.text((padding, y), 'NEEDS ATTENTION', fill='#FFC27A', font=bold)
-        y += 36
-        for lines in wrapped_issues:
-            for line in lines:
-                d.text((padding, y), line, fill='#EAB0B5', font=small)
-                y += 28
-            y += 8
-
-    output = io.BytesIO()
-    image.save(output, format='PNG', optimize=True)
-    output.seek(0)
-    file_name = f'greed-roster-{combat_role.lower()}.png'
-    embed = discord.Embed(
-        title='GREED | Live Guild Roster' if panel_index == 0 else f'GREED | Live Guild Roster ({combat_role})',
-        color=0xC7A35B,
-        description='Automatically updated from Discord roles.' if panel_index == 0 else None,
-    )
-    embed.set_image(url=f'attachment://{file_name}')
-    if panel_index == panel_count - 1:
-        embed.set_footer(text='The same message is edited whenever roles change')
-    return embed, discord.File(output, filename=file_name)
-
-
-def render_panels(roster, totals, issues):
     embeds = []
-    files = []
-    for idx, combat_role in enumerate(COMBAT):
-        embed, file = render_role_panel(roster, totals, issues, combat_role, idx, len(COMBAT))
-        embeds.append(embed)
-        files.append(file)
-    return embeds, files
+    for combat_role in COMBAT:
+        role_count = totals.get(combat_role, 0)
+        description = (
+            f"**{total_members} classified members**  |  "
+            f"🛡️ {totals.get('Tank', 0)} Tanks  |  "
+            f"💚 {totals.get('Healer', 0)} Healers  |  "
+            f"⚔️ {totals.get('DPS', 0)} DPS\n"
+            f"**{combat_role}: {role_count}**  |  "
+            + "  ·  ".join(f"{rank}: {totals.get(rank, 0)}" for rank in RANKS)
+        )
+        fields = []
+        for clazz in CLASSES:
+            ranks = roster.get(clazz, {}).get(combat_role, {})
+            class_count = sum(len(ranks.get(rank, [])) for rank in RANKS)
+            if class_count == 0:
+                continue
+            lines = []
+            for rank in RANKS:
+                players = sorted(ranks.get(rank, []), key=lambda m: m.display_name.casefold())
+                if players:
+                    lines.append(f"**{rank}**")
+                    lines.extend(f"• {short_name(member)}" for member in players)
+            for index, chunk in enumerate(chunk_lines(lines)):
+                name = f"{class_icon(guild, clazz)} {clazz} ({class_count})"
+                if index:
+                    name += f" ({index + 1})"
+                fields.append((name, chunk))
+
+        # Discord caps embeds at 25 fields and 6000 characters. Keep each page
+        # below both limits instead of losing players as the guild grows.
+        page = 1
+        while fields or page == 1:
+            embed = discord.Embed(
+                title=f"{ROLE_ICONS.get(combat_role, '⚔️')} GREED | {combat_role.upper()} ROSTER"
+                + (f" · {page}" if page > 1 else ""),
+                description=description if page == 1 else f"**{combat_role}: {role_count}** (continued)",
+                color=ROLE_EMBED_COLORS.get(combat_role, 0xC7A35B),
+            )
+            remaining = 5500 - len(embed.title) - len(embed.description)
+            while fields and len(embed.fields) < 24:
+                name, value = fields[0]
+                if len(name) + len(value) + 2 > remaining:
+                    break
+                embed.add_field(name=name[:256], value=value, inline=True)
+                remaining -= len(name) + len(value) + 2
+                fields.pop(0)
+            if not embed.fields:
+                if fields:
+                    raise ValueError("A roster field exceeds Discord's embed character limit")
+                embed.add_field(name="No players", value=f"No {combat_role.lower()}s classified yet.", inline=False)
+            embed.set_footer(text="Live guild roles · Automatically refreshed")
+            embeds.append(embed)
+            page += 1
+
+    if issues:
+        # Misconfigured members still remain visible to officers, rather than
+        # silently disappearing from the original roster.
+        lines = [
+            f"• {short_name(member)}: {describe_issue(ranks, classes, roles)}"
+            for member, ranks, classes, roles in sorted(
+                issues, key=lambda item: item[0].display_name.casefold()
+            )
+        ]
+        chunks = chunk_lines(lines)
+        for offset in range(0, len(chunks), 20):
+            embed = discord.Embed(
+                title="⚠️ GREED | NEEDS ATTENTION",
+                description="Members with missing or conflicting class, combat role, or rank mappings.",
+                color=0xD39A56,
+            )
+            for index, chunk in enumerate(chunks[offset:offset + 20], start=offset + 1):
+                embed.add_field(name=f"Unclassified members {index}", value=chunk, inline=False)
+            embeds.append(embed)
+    if len(embeds) > 10:
+        raise ValueError("Roster exceeds Discord's ten-embed message limit")
+    return embeds
 
 
 intents = discord.Intents.default()
@@ -337,7 +260,7 @@ async def update_roster():
             raise RuntimeError('ROSTER_CHANNEL_ID must refer to a text channel')
 
         members = [m async for m in guild.fetch_members(limit=None)]
-        embeds, attachments = render_panels(*build_roster(members))
+        embeds = render_panels(*build_roster(members), guild)
 
         previous = read_state()
         msg = None
@@ -350,10 +273,10 @@ async def update_roster():
                 pass
 
         if msg:
-            await msg.edit(content=None, embeds=embeds, attachments=attachments,
+            await msg.edit(content=None, embeds=embeds, attachments=[],
                            allowed_mentions=discord.AllowedMentions.none())
         else:
-            msg = await channel.send(embeds=embeds, files=attachments,
+            msg = await channel.send(embeds=embeds,
                                      allowed_mentions=discord.AllowedMentions.none())
 
         save_state([msg.id])
