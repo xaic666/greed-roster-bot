@@ -198,10 +198,12 @@ def render_panels(roster, totals, issues, guild):
                     lines.append(f"**{roster_role_mention(guild, 'guild_ranks', rank)}**")
                     lines.extend(f"• <@{member.id}>" for member in players)
             for index, chunk in enumerate(chunk_lines(lines)):
-                name = f"{class_icon(guild, clazz)} {roster_role_mention(guild, 'classes', clazz)} ({class_count})"
+                # Discord does not resolve role mentions in embed field names.
+                # Put the colored class role mention in the field value instead.
+                label = f"{class_icon(guild, clazz)} {roster_role_mention(guild, 'classes', clazz)} ({class_count})"
                 if index:
-                    name += f" ({index + 1})"
-                fields.append((name, chunk))
+                    label += f" (continued {index + 1})"
+                fields.append(("\u200b", f"{label}\n{chunk}"))
 
         # Discord caps embeds at 25 fields and 6000 characters. Keep each page
         # below both limits instead of losing players as the guild grows.
