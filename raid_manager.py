@@ -118,7 +118,28 @@ class BrowserFilterSelect(discord.ui.Select):
         setattr(self.view, self.field_key, None if value == "all" else value)
         await self.view.refresh(i, reset_page=True)
 
-class RosterBrowserView(discord.ui.View):
+class LoggedView(discord.ui.View):
+    """Log component failures and give the user a useful response."""
+    async def on_error(self, interaction, error, item):
+        log.error(
+            "Raid component failed: custom_id=%s user=%s interaction=%s responded=%s",
+            getattr(item, "custom_id", None),
+            getattr(interaction.user, "id", None),
+            interaction.id,
+            interaction.response.is_done(),
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        try:
+            message = "Roster action failed. Please check the bot logs."
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            log.exception("Could not deliver raid component error response")
+
+
+class RosterBrowserView(LoggedView):
     def __init__(self, role=None, clazz=None):
         super().__init__(timeout=300)
         self.role = role
@@ -181,7 +202,7 @@ class PublicClassSelect(discord.ui.Select):
     async def callback(self, i):
         await show_browser(i, clazz=self.values[0])
 
-class PublicRosterView(discord.ui.View):
+class PublicRosterView(LoggedView):
     def __init__(self, bot):
         super().__init__(timeout=None)
         self.bot = bot
@@ -272,7 +293,7 @@ class FieldPicker(discord.ui.Select):
         await i.response.defer()
 
 
-class EditRosterView(discord.ui.View):
+class EditRosterView(LoggedView):
     def __init__(self, bot, removing=False):
         super().__init__(timeout=300)
         self.bot = bot
@@ -364,6 +385,7 @@ class RosterView(PublicRosterView):
         await i.response.send_message(
             "Choose a guild member, class, main role and optional off-spec, then click **Save / Confirm**.",
             view=EditRosterView(self.bot), ephemeral=True)
+        log.info("Raid Add/Edit editor sent: interaction=%s", i.id)
 
     @discord.ui.button(label="Remove", emoji="🗑️", style=discord.ButtonStyle.secondary, custom_id="greed:raid:remove", row=2)
     async def remove(self, i, button):
@@ -374,6 +396,7 @@ class RosterView(PublicRosterView):
         await i.response.send_message(
             "Select the member to remove, then click **Save / Confirm**.",
             view=EditRosterView(self.bot, removing=True), ephemeral=True)
+        log.info("Raid Remove editor sent: interaction=%s", i.id)
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, custom_id="greed:raid:refresh", row=2)
     async def reload(self, i, button):
@@ -381,10 +404,12 @@ class RosterView(PublicRosterView):
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
             return
-        await i.response.defer(ephemeral=True)
+        await i.response.defer(ephemeral=True, thinking=True)
+        log.info("Raid Refresh acknowledged: interaction=%s", i.id)
         try:
             updated = await refresh(self.bot, i.guild)
             await i.followup.send("Roster refreshed." if updated else "Use /raid_roster to publish.", ephemeral=True)
+            log.info("Raid Refresh completed: interaction=%s updated=%s", i.id, updated)
         except discord.HTTPException:
             log.exception("Roster refresh failed")
             await i.followup.send("Roster refresh failed. Check bot logs.", ephemeral=True)
@@ -412,8 +437,10 @@ async def ensure_control(bot, guild, setup_id):
     save(data)
 
 def register(bot, guild_id, channel_id, setup_id):
+    # RosterView inherits every public control. Registering both creates
+    # duplicate persistent custom_id handlers and obscures dispatch ownership.
     bot.add_view(RosterView(bot))
-    bot.add_view(PublicRosterView(bot))
+    log.info("Registered persistent raid roster controls")
 
     @bot.tree.command(name="raid_roster", description="Publish or refresh the raid roster and browser", guild=discord.Object(id=guild_id))
     @app_commands.default_permissions(administrator=True)
