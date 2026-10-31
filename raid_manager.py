@@ -101,6 +101,68 @@ def browser_embed(guild, role=None, clazz=None, page=0):
     embed.set_footer(text=f"Page {page + 1}/{page_count} | {len(entries)} player{'s' if len(entries) != 1 else ''}")
     return embed, page, page_count
 
+def full_roster_embeds(guild):
+    """Display the full confirmed roster, grouped by main role and class."""
+    players = load()["players"]
+    embeds = []
+    for role in ROLES:
+        role_players = [
+            (int(uid), entry) for uid, entry in players.items()
+            if entry.get("main") == role
+        ]
+        role_players.sort(key=lambda item: (
+            CLASSES.index(item[1]["class"]) if item[1]["class"] in CLASSES else len(CLASSES),
+            (guild.get_member(item[0]).display_name.casefold()
+             if guild.get_member(item[0]) else str(item[0])),
+        ))
+        embed = discord.Embed(
+            title=f"{guild_emoji(guild, role)} {role} | Full Raid Roster".strip(),
+            color=0xC7A35B,
+            description=f"**{len(role_players)} {role} players**",
+        )
+        for clazz in CLASSES:
+            members = [(uid, entry) for uid, entry in role_players if entry["class"] == clazz]
+            if not members:
+                continue
+            lines = []
+            for uid, entry in members:
+                suffix = []
+                if entry.get("off") not in (None, "None"):
+                    suffix.append(f"Off: {entry['off']}")
+                if entry.get("designated_off_tank", False):
+                    suffix.append("Designated OT")
+                lines.append(f"<@{uid}>" + (f" ({', '.join(suffix)})" if suffix else ""))
+            # Field values are limited to 1024 characters by Discord.
+            chunk = ""
+            for line in lines:
+                if chunk and len(chunk) + len(line) + 1 > 950:
+                    embed.add_field(name=f"{clazz} (continued)", value=chunk, inline=False)
+                    chunk = ""
+                chunk += ("\n" if chunk else "") + line
+            if chunk:
+                embed.add_field(
+                    name=f"{guild_emoji(guild, clazz)} {clazz}".strip(),
+                    value=chunk,
+                    inline=False,
+                )
+        if not role_players:
+            embed.add_field(name="No players", value="No confirmed players in this role yet.", inline=False)
+        embeds.append(embed)
+    return embeds
+
+
+async def show_all_roster(i):
+    # Acknowledge immediately, since a large roster can take time to render.
+    await i.response.defer(ephemeral=True, thinking=True)
+    embeds = full_roster_embeds(i.guild)
+    # Discord allows at most ten embeds per message.
+    await i.followup.send(
+        embeds=embeds, ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+    log.info("Full roster opened: user=%s interaction=%s", i.user.id, i.id)
+
+
 class BrowserFilterSelect(discord.ui.Select):
     def __init__(self, field_key, placeholder, values, row):
         super().__init__(
@@ -207,6 +269,11 @@ class PublicRosterView(LoggedView):
         super().__init__(timeout=None)
         self.bot = bot
         self.add_item(PublicClassSelect())
+
+    @discord.ui.button(label="Show All", emoji="📋", style=discord.ButtonStyle.primary, custom_id="greed:raid:show-all", row=0)
+    async def show_all(self, i, button):
+        log.info("Raid Show All clicked: user=%s interaction=%s", i.user.id, i.id)
+        await show_all_roster(i)
 
     @discord.ui.button(label="Tank", style=discord.ButtonStyle.secondary, custom_id="greed:raid:browse:Tank", row=0)
     async def browse_tank(self, i, button):
