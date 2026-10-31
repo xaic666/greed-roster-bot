@@ -117,7 +117,7 @@ CLASS_ICONS = {
     "Rogue": "🗡️", "Priest": "✨", "Shaman": "⚡",
     "Mage": "🔮", "Warlock": "🔥", "Druid": "🌿",
 }
-ROLE_ICONS = {"Tank": "🟦 🛡️", "Healer": "🟩 ✚", "DPS": "🟥 ⚔️"}
+ROLE_EMOJI_NAMES = {"Tank": "tank", "Healer": "healer", "DPS": "dps"}
 # Native Discord embeds do not support colored text spans.
 # Use role-colored borders and recognizable class/rank color swatches instead.
 ROLE_EMBED_COLORS = {name: int(value.lstrip("#"), 16) for name, value in ROLE_COLORS.items()}
@@ -135,6 +135,18 @@ def class_icon(guild, clazz):
     # Prefer a server's existing class emoji, just like Raid-Helper.
     emoji = discord.utils.get(guild.emojis, name=clazz.lower())
     return str(emoji) if emoji else CLASS_ICONS.get(clazz, "⚔️")
+
+def combat_role_icon(guild, role):
+    """Use the guild's custom :tank:, :healer: and :dps: emojis."""
+    name = ROLE_EMOJI_NAMES.get(role)
+    if not name:
+        return ""
+    emoji = discord.utils.get(guild.emojis, name=name)
+    if emoji is None:
+        log.warning("Missing guild emoji :%s:; displaying role without icon", name)
+        return ""
+    return str(emoji)
+
 
 def roster_role_mention(guild, section, key):
     """Display the configured Discord role in its native server color.
@@ -175,13 +187,14 @@ def render_panels(roster, totals, issues, guild):
     """Return native Discord embeds, grouped by combat role then class."""
     total_members = sum(totals.get(rank, 0) for rank in RANKS)
     embeds = []
+    role_icons = {role: combat_role_icon(guild, role) for role in COMBAT}
     for combat_role in COMBAT:
         role_count = totals.get(combat_role, 0)
         description = (
             f"**{total_members} classified members**  |  "
-            f"{ROLE_ICONS['Tank']} {totals.get('Tank', 0)} Tanks  |  "
-            f"{ROLE_ICONS['Healer']} {totals.get('Healer', 0)} Healers  |  "
-            f"{ROLE_ICONS['DPS']} {totals.get('DPS', 0)} DPS\n"
+            f"{role_icons.get('Tank', '')} {totals.get('Tank', 0)} Tanks  |  "
+            f"{role_icons.get('Healer', '')} {totals.get('Healer', 0)} Healers  |  "
+            f"{role_icons.get('DPS', '')} {totals.get('DPS', 0)} DPS\n"
             f"**{combat_role}: {role_count}**  |  "
             + "  ·  ".join(f"{rank}: {totals.get(rank, 0)}" for rank in RANKS)
         )
@@ -210,7 +223,7 @@ def render_panels(roster, totals, issues, guild):
         page = 1
         while fields or page == 1:
             embed = discord.Embed(
-                title=f"{ROLE_ICONS.get(combat_role, '⚔️')} GREED | {combat_role.upper()} ROSTER"
+                title=f"{role_icons.get(combat_role, '')} GREED | {combat_role.upper()} ROSTER"
                 + (f" · {page}" if page > 1 else ""),
                 description=description if page == 1 else f"**{combat_role}: {role_count}** (continued)",
                 color=ROLE_EMBED_COLORS.get(combat_role, 0xC7A35B),
