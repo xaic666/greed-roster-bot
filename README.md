@@ -50,11 +50,12 @@ The panel uses Unicode emojis for classes, combat roles, and guild ranks. Discor
 In addition to the existing automatic guild-role panels, the bot now supports a **separate confirmed raid roster**.
 
 1. Restart the bot after pulling changes.
-2. In Discord, run `/raid_roster` (requires **Manage Server**) to publish the editable roster in the configured roster channel.
-3. Use **Add / Edit**, **Remove**, and **Refresh** buttons below the roster embed.
-4. For Add / Edit, enter a member's Discord ID or mention, WoW class, main role (Tank, Healer, DPS), and optional off-spec (Tank, Healer, DPS, None).
+2. In Discord, run `/raid_roster` (requires **Administrator**) to publish the compact roster summary in the configured roster channel.
+3. Use the **Tank**, **Healer**, and **DPS** buttons or the class menu to open a private roster browser. Its role and class filters and page controls work without changing the public message.
+4. In the private setup channel, use **Add / Edit**, **Remove**, and **Refresh** below the live preview.
+5. For Add / Edit, select a member, WoW class, main role (Tank, Healer, DPS), and optional off-spec (Tank, Healer, DPS, None).
 
-The raid roster begins empty. Officers add confirmed Raiders manually. Discord guild ranks and combat roles are **not** modified by this feature. Existing automatic Tank/Healer/DPS guild panels remain intact.
+The raid roster begins empty. Officers add confirmed Raiders manually. The public summary stays compact as the roster grows; player mentions appear in paginated, ephemeral browsers visible only to the member using them. Discord guild ranks and combat roles are **not** modified by this feature. Existing automatic Tank/Healer/DPS guild panels remain intact.
 
 The file `raid_players.json` stores assignments and the raid roster message ID locally, persists across restarts, and is excluded from Git. Keep it when migrating the bot. Back it up periodically, and run only one copy of the bot.
 
