@@ -42,7 +42,7 @@ CLASS_COLORS = {
     'Rogue': '#FFF569', 'Priest': '#FFFFFF', 'Shaman': '#0070DE',
     'Mage': '#69CCF0', 'Warlock': '#9482C9', 'Druid': '#FF7D0A'
 }
-ROLE_COLORS = {'Tank': '#7DB8FF', 'Healer': '#7EDC8E', 'DPS': '#F0D27A'}
+ROLE_COLORS = {'Tank': '#3498DB', 'Healer': '#2ECC71', 'DPS': '#C0392B'}
 
 
 def role_matches(member, categories):
@@ -117,7 +117,7 @@ CLASS_ICONS = {
     "Rogue": "🗡️", "Priest": "✨", "Shaman": "⚡",
     "Mage": "🔮", "Warlock": "🔥", "Druid": "🌿",
 }
-ROLE_ICONS = {"Tank": "🛡️", "Healer": "💚", "DPS": "⚔️"}
+ROLE_ICONS = {"Tank": "🟦 🛡️", "Healer": "🟩 ✚", "DPS": "🟥 ⚔️"}
 # Native Discord embeds do not support colored text spans.
 # Use role-colored borders and recognizable class/rank color swatches instead.
 ROLE_EMBED_COLORS = {name: int(value.lstrip("#"), 16) for name, value in ROLE_COLORS.items()}
@@ -179,9 +179,9 @@ def render_panels(roster, totals, issues, guild):
         role_count = totals.get(combat_role, 0)
         description = (
             f"**{total_members} classified members**  |  "
-            f"🛡️ {totals.get('Tank', 0)} Tanks  |  "
-            f"💚 {totals.get('Healer', 0)} Healers  |  "
-            f"⚔️ {totals.get('DPS', 0)} DPS\n"
+            f"{ROLE_ICONS['Tank']} {totals.get('Tank', 0)} Tanks  |  "
+            f"{ROLE_ICONS['Healer']} {totals.get('Healer', 0)} Healers  |  "
+            f"{ROLE_ICONS['DPS']} {totals.get('DPS', 0)} DPS\n"
             f"**{combat_role}: {role_count}**  |  "
             + "  ·  ".join(f"{rank}: {totals.get(rank, 0)}" for rank in RANKS)
         )
