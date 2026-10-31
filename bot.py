@@ -118,7 +118,17 @@ CLASS_ICONS = {
     "Mage": "🔮", "Warlock": "🔥", "Druid": "🌿",
 }
 ROLE_ICONS = {"Tank": "🛡️", "Healer": "💚", "DPS": "⚔️"}
-ROLE_EMBED_COLORS = {"Tank": 0x528CC4, "Healer": 0x54A878, "DPS": 0xC7A35B}
+# Native Discord embeds do not support colored text spans.
+# Use role-colored borders and recognizable class/rank color swatches instead.
+ROLE_EMBED_COLORS = {name: int(value.lstrip("#"), 16) for name, value in ROLE_COLORS.items()}
+CLASS_COLOR_MARKERS = {
+    "Warrior": "🟫", "Paladin": "🩷", "Hunter": "🟩",
+    "Rogue": "🟨", "Priest": "⬜", "Shaman": "🟦",
+    "Mage": "🩵", "Warlock": "🟪", "Druid": "🟧",
+}
+# Requested role-rank colors: Raider #E91E63, Social #E74C3C.
+RANK_COLORS = {"Raider": "#E91E63", "Recruit": "#F0D27A", "Social": "#E74C3C"}
+RANK_MARKERS = {"Raider": "🩷", "Recruit": "🟨", "Social": "🔴"}
 
 
 def class_icon(guild, clazz):
@@ -171,10 +181,10 @@ def render_panels(roster, totals, issues, guild):
             for rank in RANKS:
                 players = sorted(ranks.get(rank, []), key=lambda m: m.display_name.casefold())
                 if players:
-                    lines.append(f"**{rank}**")
+                    lines.append(f"{RANK_MARKERS.get(rank, '⚪')} **{rank}**")
                     lines.extend(f"• <@{member.id}>" for member in players)
             for index, chunk in enumerate(chunk_lines(lines)):
-                name = f"{class_icon(guild, clazz)} {clazz} ({class_count})"
+                name = f"{CLASS_COLOR_MARKERS.get(clazz, '⚪')} {class_icon(guild, clazz)} {clazz} ({class_count})"
                 if index:
                     name += f" ({index + 1})"
                 fields.append((name, chunk))
