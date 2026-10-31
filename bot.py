@@ -385,8 +385,41 @@ def schedule_update():
 
 
 @bot.event
+async def on_socket_response(payload):
+    # Raw gateway logging lets us distinguish routing failures from callback errors.
+    if payload.get('t') != 'INTERACTION_CREATE':
+        return
+    data = payload.get('d') or {}
+    component = data.get('data') or {}
+    log.info(
+        'Gateway interaction: type=%s custom_id=%s message=%s guild=%s app=%s user=%s',
+        data.get('type'), component.get('custom_id'),
+        (data.get('message') or {}).get('id'), data.get('guild_id'),
+        data.get('application_id'),
+        ((data.get('member') or {}).get('user') or data.get('user') or {}).get('id')
+    )
+
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    # This should appear for a received interaction even when its view is not found.
+    log.info(
+        'Parsed interaction: type=%s custom_id=%s message=%s guild=%s user=%s',
+        interaction.type, (interaction.data or {}).get('custom_id'),
+        interaction.message.id if interaction.message else None,
+        interaction.guild_id, interaction.user.id
+    )
+
+
+@bot.event
 async def on_ready():
-    log.info('Logged in as %s', bot.user)
+    log.info('Logged in as %s (bot_id=%s guild_id=%s setup_channel=%s)',
+             bot.user, bot.user.id, GUILD_ID, SETUP_CHANNEL_ID)
+    log.info('Registered persistent views: %s', len(bot.persistent_views))
+    for view in bot.persistent_views:
+        log.info('Persistent view %s: %s', type(view).__name__,
+                 [getattr(item, 'custom_id', None) for item in view.children])
+
     try:
         await update_roster()
     except Exception:
