@@ -11,12 +11,13 @@ FILE = Path(__file__).with_name("raid_players.json")
 CLASSES = ("Warrior","Paladin","Hunter","Rogue","Priest","Shaman","Mage","Warlock","Druid")
 ROLES = ("Tank","Healer","DPS")
 TARGET = 30
+PAGE_SIZE = 12
 
 def load():
     try:
         return json.loads(FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
-        return {"players": {}, "board": None, "control": None}
+        return {"players": {}, "board": None, "control": None, "updated_at": None}
 
 def save(data):
     tmp = FILE.with_suffix(".tmp")
@@ -32,34 +33,171 @@ def guild_emoji(guild, name):
     return str(emoji) if emoji is not None else ""
 
 def board_embed(guild):
-    data = load()["players"]
-    counts = {role: sum(v["main"] == role for v in data.values()) for role in ROLES}
-    off_tanks = sum(v.get("designated_off_tank", False) for v in data.values())
-    embed = discord.Embed(title="⚔️ Greed | Confirmed Raid Roster",
-        description=(f"**{len(data)}/{TARGET} Raiders**  |  "
-                     f"{guild_emoji(guild, 'tank')} {counts['Tank']} Tank  |  "
-                     f"{guild_emoji(guild, 'healer')} {counts['Healer']} Healer  |  "
-                     f"{guild_emoji(guild, 'dps')} {counts['DPS']} DPS\n"
-                     f"**Designated Off-Tanks:** {off_tanks}"),
-        color=0xC7A35B)
-    for role in ROLES:
-        entries = sorted(((int(uid), p) for uid, p in data.items() if p["main"] == role), key=lambda x: x[0])
-        lines = [
-            f"<@{uid}> | {guild_emoji(guild, p['class'])} {p['class']}"
-            + (f" | {guild_emoji(guild, p['off'])} Off-spec: {p['off']}" if p['off'] != "None" else "")
-            + (" | 🛡️ **Designated OT**" if p.get("designated_off_tank", False) else "")
-            for uid, p in entries
-        ]
-        if not lines: lines = ["*Open*"]
-        # Split field values to respect Discord's 1024-char limit.
-        chunk = ""
-        for line in lines:
-            if len(chunk) + len(line) + 1 > 950:
-                embed.add_field(name=f"{guild_emoji(guild, role)} {role}", value=chunk, inline=False)
-                chunk = ""
-            chunk += line + "\n"
-        if chunk: embed.add_field(name=f"{guild_emoji(guild, role)} {role}", value=chunk, inline=False)
+    data = load()
+    players = data["players"]
+    counts = {role: sum(v["main"] == role for v in players.values()) for role in ROLES}
+    off_tanks = sum(v.get("designated_off_tank", False) for v in players.values())
+    description = [
+        f"**{len(players)}/{TARGET} Raiders**  |  "
+        f"{guild_emoji(guild, 'tank')} {counts['Tank']} Tank  |  "
+        f"{guild_emoji(guild, 'healer')} {counts['Healer']} Healer  |  "
+        f"{guild_emoji(guild, 'dps')} {counts['DPS']} DPS",
+        f"**Designated Off-Tanks:** {off_tanks}",
+        "Browse players by role or class using the controls below.",
+    ]
+    if data.get("updated_at"):
+        description.append(f"Updated <t:{data['updated_at']}:R>")
+    embed = discord.Embed(
+        title="⚔️ Greed | Confirmed Raid Roster",
+        description="\n".join(description),
+        color=0xC7A35B,
+    )
+    coverage = []
+    for clazz in CLASSES:
+        count = sum(p["class"] == clazz for p in players.values())
+        emoji = guild_emoji(guild, clazz)
+        coverage.append(f"{emoji} **{clazz}:** {count}" if emoji else f"**{clazz}:** {count}")
+    for index in range(0, len(coverage), 3):
+        embed.add_field(
+            name="Class coverage" if index == 0 else "\u200b",
+            value="\n".join(coverage[index:index + 3]),
+            inline=True,
+        )
     return embed
+
+def browser_embed(guild, role=None, clazz=None, page=0):
+    players = load()["players"]
+    entries = [
+        (int(uid), player) for uid, player in players.items()
+        if (role is None or player["main"] == role)
+        and (clazz is None or player["class"] == clazz)
+    ]
+
+    def sort_key(entry):
+        uid, player = entry
+        member = guild.get_member(uid)
+        name = member.display_name if member else str(uid)
+        return (ROLES.index(player["main"]), CLASSES.index(player["class"]), name.casefold())
+
+    entries.sort(key=sort_key)
+    page_count = max(1, (len(entries) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, page_count - 1))
+    visible = entries[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    lines = []
+    for uid, player in visible:
+        details = [f"{guild_emoji(guild, player['class'])} {player['class']}".strip()]
+        if player["off"] != "None":
+            details.append(f"Off: {player['off']}")
+        if player.get("designated_off_tank", False):
+            details.append("🛡️ **Designated OT**")
+        lines.append(f"<@{uid}> | {' | '.join(details)}")
+    if not lines:
+        empty = "No players match these filters." if players else "No Raiders have been confirmed yet."
+        lines = [f"*{empty}*"]
+    title_parts = ["⚔️ Greed | Raid Roster", role or "All roles"]
+    if clazz:
+        title_parts.append(clazz)
+    embed = discord.Embed(title=" · ".join(title_parts), description="\n".join(lines), color=0xC7A35B)
+    embed.set_footer(text=f"Page {page + 1}/{page_count} | {len(entries)} player{'s' if len(entries) != 1 else ''}")
+    return embed, page, page_count
+
+class BrowserFilterSelect(discord.ui.Select):
+    def __init__(self, field_key, placeholder, values, row):
+        super().__init__(
+            placeholder=placeholder,
+            min_values=1,
+            max_values=1,
+            row=row,
+            options=[discord.SelectOption(label="All", value="all")]
+            + [discord.SelectOption(label=value, value=value) for value in values],
+        )
+        self.field_key = field_key
+
+    async def callback(self, i):
+        value = self.values[0]
+        setattr(self.view, self.field_key, None if value == "all" else value)
+        await self.view.refresh(i, reset_page=True)
+
+class RosterBrowserView(discord.ui.View):
+    def __init__(self, role=None, clazz=None):
+        super().__init__(timeout=300)
+        self.role = role
+        self.clazz = clazz
+        self.page = 0
+        self.add_item(BrowserFilterSelect("role", "Filter by role", ROLES, 0))
+        self.add_item(BrowserFilterSelect("clazz", "Filter by class", CLASSES, 1))
+
+    def message(self, guild):
+        embed, self.page, page_count = browser_embed(guild, self.role, self.clazz, self.page)
+        self.previous.disabled = self.page == 0
+        self.next.disabled = self.page == page_count - 1
+        selected = {"role": self.role, "clazz": self.clazz}
+        for item in self.children:
+            if isinstance(item, BrowserFilterSelect):
+                current = selected[item.field_key] or "all"
+                for option in item.options:
+                    option.default = option.value == current
+        return embed
+
+    async def refresh(self, i, reset_page=False):
+        if reset_page:
+            self.page = 0
+        await i.response.edit_message(
+            embed=self.message(i.guild),
+            view=self,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=2)
+    async def previous(self, i, button):
+        self.page -= 1
+        await self.refresh(i)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary, row=2)
+    async def next(self, i, button):
+        self.page += 1
+        await self.refresh(i)
+
+async def show_browser(i, role=None, clazz=None):
+    view = RosterBrowserView(role, clazz)
+    await i.response.send_message(
+        embed=view.message(i.guild),
+        view=view,
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+class PublicClassSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="Browse by class",
+            min_values=1,
+            max_values=1,
+            row=1,
+            custom_id="greed:raid:browse-class",
+            options=[discord.SelectOption(label=value, value=value) for value in CLASSES],
+        )
+
+    async def callback(self, i):
+        await show_browser(i, clazz=self.values[0])
+
+class PublicRosterView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.add_item(PublicClassSelect())
+
+    @discord.ui.button(label="Tank", style=discord.ButtonStyle.secondary, custom_id="greed:raid:browse:Tank", row=0)
+    async def browse_tank(self, i, button):
+        await show_browser(i, role="Tank")
+
+    @discord.ui.button(label="Healer", style=discord.ButtonStyle.secondary, custom_id="greed:raid:browse:Healer", row=0)
+    async def browse_healer(self, i, button):
+        await show_browser(i, role="Healer")
+
+    @discord.ui.button(label="DPS", style=discord.ButtonStyle.secondary, custom_id="greed:raid:browse:DPS", row=0)
+    async def browse_dps(self, i, button):
+        await show_browser(i, role="DPS")
 
 async def refresh_setup_preview(bot, guild):
     """Mirror the public roster into the private admin control message."""
@@ -97,7 +235,7 @@ async def refresh(bot, guild):
         save(data)
         return False
     if msg.author.id != bot.user.id: return False
-    await msg.edit(embed=board_embed(guild), attachments=[], view=None,
+    await msg.edit(embed=board_embed(guild), attachments=[], view=PublicRosterView(bot),
         allowed_mentions=discord.AllowedMentions.none())
     await refresh_setup_preview(bot, guild)
     return True
@@ -191,6 +329,7 @@ class EditRosterView(discord.ui.View):
             data["players"][uid] = {"class": self.clazz, "main": self.main, "off": self.off,
                                     "designated_off_tank": self.designated_off_tank}
             result = "Roster entry saved."
+        data["updated_at"] = int(time.time())
         save(data)
         updated = False
         try:
@@ -212,12 +351,11 @@ class EditRosterView(discord.ui.View):
             await i.followup.send(result, ephemeral=True)
 
 
-class RosterView(discord.ui.View):
+class RosterView(PublicRosterView):
     def __init__(self, bot):
-        super().__init__(timeout=None)
-        self.bot = bot
+        super().__init__(bot)
 
-    @discord.ui.button(label="Add / Edit", emoji="✏️", style=discord.ButtonStyle.primary, custom_id="greed:raid:edit")
+    @discord.ui.button(label="Add / Edit", emoji="✏️", style=discord.ButtonStyle.primary, custom_id="greed:raid:edit", row=2)
     async def edit(self, i, button):
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
@@ -226,7 +364,7 @@ class RosterView(discord.ui.View):
             "Choose a guild member, class, main role and optional off-spec, then click **Save / Confirm**.",
             view=EditRosterView(self.bot), ephemeral=True)
 
-    @discord.ui.button(label="Remove", emoji="🗑️", style=discord.ButtonStyle.secondary, custom_id="greed:raid:remove")
+    @discord.ui.button(label="Remove", emoji="🗑️", style=discord.ButtonStyle.secondary, custom_id="greed:raid:remove", row=2)
     async def remove(self, i, button):
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
@@ -235,7 +373,7 @@ class RosterView(discord.ui.View):
             "Select the member to remove, then click **Save / Confirm**.",
             view=EditRosterView(self.bot, removing=True), ephemeral=True)
 
-    @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, custom_id="greed:raid:refresh")
+    @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, custom_id="greed:raid:refresh", row=2)
     async def reload(self, i, button):
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
@@ -272,8 +410,9 @@ async def ensure_control(bot, guild, setup_id):
 
 def register(bot, guild_id, channel_id, setup_id):
     bot.add_view(RosterView(bot))
+    bot.add_view(PublicRosterView(bot))
 
-    @bot.tree.command(name="raid_roster", description="Publish or refresh the editable raid roster", guild=discord.Object(id=guild_id))
+    @bot.tree.command(name="raid_roster", description="Publish or refresh the raid roster and browser", guild=discord.Object(id=guild_id))
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
     async def raid_roster(i):
@@ -317,7 +456,7 @@ def register(bot, guild_id, channel_id, setup_id):
                 "Check channel and category overrides for the bot role.", ephemeral=True)
             return
         try:
-            msg = await channel.send(embed=board_embed(i.guild),
+            msg = await channel.send(embed=board_embed(i.guild), view=PublicRosterView(bot),
                 allowed_mentions=discord.AllowedMentions.none())
         except discord.Forbidden as exc:
             await i.followup.send(
