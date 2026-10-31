@@ -215,13 +215,13 @@ def render_panels(roster, totals, issues, guild):
             )
         ]
         chunks = chunk_lines(lines)
-        for offset in range(0, len(chunks), 20):
+        for offset in range(0, len(chunks), 5):
             embed = discord.Embed(
                 title="⚠️ GREED | NEEDS ATTENTION",
                 description="Members with missing or conflicting class, combat role, or rank mappings.",
                 color=0xD39A56,
             )
-            for index, chunk in enumerate(chunks[offset:offset + 20], start=offset + 1):
+            for index, chunk in enumerate(chunks[offset:offset + 5], start=offset + 1):
                 embed.add_field(name=f"Unclassified members {index}", value=chunk, inline=False)
             embeds.append(embed)
     if len(embeds) > 10:
