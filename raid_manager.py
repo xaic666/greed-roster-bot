@@ -436,11 +436,21 @@ async def ensure_control(bot, guild, setup_id):
     data["control"] = {"channel_id": setup_id, "message_id": message.id}
     save(data)
 
+def register_views(bot):
+    """Register persistent views after login, binding the saved setup message."""
+    view = RosterView(bot)
+    bot.add_view(view)
+    log.info("Registered persistent raid controls (fallback): %s",
+             [(item.type.value, item.custom_id) for item in view.children])
+    state = load().get("control")
+    if state and state.get("message_id"):
+        message_id = int(state["message_id"])
+        bot.add_view(RosterView(bot), message_id=message_id)
+        log.info("Bound raid admin controls to setup message %s", message_id)
+
+
 def register(bot, guild_id, channel_id, setup_id):
-    # RosterView inherits every public control. Registering both creates
-    # duplicate persistent custom_id handlers and obscures dispatch ownership.
-    bot.add_view(RosterView(bot))
-    log.info("Registered persistent raid roster controls")
+    # Commands are registered at import time; views are bound in setup_hook().
 
     @bot.tree.command(name="raid_roster", description="Publish or refresh the raid roster and browser", guild=discord.Object(id=guild_id))
     @app_commands.default_permissions(administrator=True)
