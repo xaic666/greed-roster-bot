@@ -204,15 +204,21 @@ def render_panels(roster, totals, issues, guild):
             class_count = sum(len(ranks.get(rank, [])) for rank in RANKS)
             if class_count == 0:
                 continue
+            # Keep each class as one compact inline column when possible.
+            # Two clickable member mentions per line reduce vertical height.
             lines = []
             for rank in RANKS:
                 players = sorted(ranks.get(rank, []), key=lambda m: m.display_name.casefold())
-                if players:
-                    lines.append(f"**{roster_role_mention(guild, 'guild_ranks', rank)}**")
-                    lines.extend(f"• <@{member.id}>" for member in players)
-            for index, chunk in enumerate(chunk_lines(lines)):
-                # Discord does not resolve role mentions in embed field names.
-                # Put the colored class role mention in the field value instead.
+                if not players:
+                    continue
+                mentions = [f"<@{member.id}>" for member in players]
+                rank_label = roster_role_mention(guild, "guild_ranks", rank)
+                for offset in range(0, len(mentions), 2):
+                    group = " ".join(mentions[offset:offset + 2])
+                    prefix = f"{rank_label}: " if offset == 0 else "↳ "
+                    lines.append(prefix + group)
+            for index, chunk in enumerate(chunk_lines(lines, limit=780)):
+                # Role mentions resolve only inside embed values, not field names.
                 label = f"{class_icon(guild, clazz)} {roster_role_mention(guild, 'classes', clazz)} ({class_count})"
                 if index:
                     label += f" (continued {index + 1})"
