@@ -172,7 +172,7 @@ def render_panels(roster, totals, issues, guild):
                 players = sorted(ranks.get(rank, []), key=lambda m: m.display_name.casefold())
                 if players:
                     lines.append(f"**{rank}**")
-                    lines.extend(f"• {short_name(member)}" for member in players)
+                    lines.extend(f"• <@{member.id}>" for member in players)
             for index, chunk in enumerate(chunk_lines(lines)):
                 name = f"{class_icon(guild, clazz)} {clazz} ({class_count})"
                 if index:
