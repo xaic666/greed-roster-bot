@@ -90,6 +90,8 @@ def browser_embed(guild, role=None, clazz=None, page=0):
             details.append(f"Off: {player['off']}")
         if player.get("designated_off_tank", False):
             details.append("🛡️ **Designated OT**")
+        if player.get("note"):
+            details.append(f"📝 {player['note'][:100]}")
         lines.append(f"<@{uid}> | {' | '.join(details)}")
     if not lines:
         empty = "No players match these filters." if players else "No Raiders have been confirmed yet."
@@ -100,68 +102,6 @@ def browser_embed(guild, role=None, clazz=None, page=0):
     embed = discord.Embed(title=" · ".join(title_parts), description="\n".join(lines), color=0xC7A35B)
     embed.set_footer(text=f"Page {page + 1}/{page_count} | {len(entries)} player{'s' if len(entries) != 1 else ''}")
     return embed, page, page_count
-
-def full_roster_embeds(guild):
-    """Display the full confirmed roster, grouped by main role and class."""
-    players = load()["players"]
-    embeds = []
-    for role in ROLES:
-        role_players = [
-            (int(uid), entry) for uid, entry in players.items()
-            if entry.get("main") == role
-        ]
-        role_players.sort(key=lambda item: (
-            CLASSES.index(item[1]["class"]) if item[1]["class"] in CLASSES else len(CLASSES),
-            (guild.get_member(item[0]).display_name.casefold()
-             if guild.get_member(item[0]) else str(item[0])),
-        ))
-        embed = discord.Embed(
-            title=f"{guild_emoji(guild, role)} {role} | Full Raid Roster".strip(),
-            color=0xC7A35B,
-            description=f"**{len(role_players)} {role} players**",
-        )
-        for clazz in CLASSES:
-            members = [(uid, entry) for uid, entry in role_players if entry["class"] == clazz]
-            if not members:
-                continue
-            lines = []
-            for uid, entry in members:
-                suffix = []
-                if entry.get("off") not in (None, "None"):
-                    suffix.append(f"Off: {entry['off']}")
-                if entry.get("designated_off_tank", False):
-                    suffix.append("Designated OT")
-                lines.append(f"<@{uid}>" + (f" ({', '.join(suffix)})" if suffix else ""))
-            # Field values are limited to 1024 characters by Discord.
-            chunk = ""
-            for line in lines:
-                if chunk and len(chunk) + len(line) + 1 > 950:
-                    embed.add_field(name=f"{clazz} (continued)", value=chunk, inline=False)
-                    chunk = ""
-                chunk += ("\n" if chunk else "") + line
-            if chunk:
-                embed.add_field(
-                    name=f"{guild_emoji(guild, clazz)} {clazz}".strip(),
-                    value=chunk,
-                    inline=False,
-                )
-        if not role_players:
-            embed.add_field(name="No players", value="No confirmed players in this role yet.", inline=False)
-        embeds.append(embed)
-    return embeds
-
-
-async def show_all_roster(i):
-    # Acknowledge immediately, since a large roster can take time to render.
-    await i.response.defer(ephemeral=True, thinking=True)
-    embeds = full_roster_embeds(i.guild)
-    # Discord allows at most ten embeds per message.
-    await i.followup.send(
-        embeds=embeds, ephemeral=True,
-        allowed_mentions=discord.AllowedMentions.none(),
-    )
-    log.info("Full roster opened: user=%s interaction=%s", i.user.id, i.id)
-
 
 class BrowserFilterSelect(discord.ui.Select):
     def __init__(self, field_key, placeholder, values, row):
@@ -180,28 +120,7 @@ class BrowserFilterSelect(discord.ui.Select):
         setattr(self.view, self.field_key, None if value == "all" else value)
         await self.view.refresh(i, reset_page=True)
 
-class LoggedView(discord.ui.View):
-    """Log component failures and give the user a useful response."""
-    async def on_error(self, interaction, error, item):
-        log.error(
-            "Raid component failed: custom_id=%s user=%s interaction=%s responded=%s",
-            getattr(item, "custom_id", None),
-            getattr(interaction.user, "id", None),
-            interaction.id,
-            interaction.response.is_done(),
-            exc_info=(type(error), error, error.__traceback__),
-        )
-        try:
-            message = "Roster action failed. Please check the bot logs."
-            if interaction.response.is_done():
-                await interaction.followup.send(message, ephemeral=True)
-            else:
-                await interaction.response.send_message(message, ephemeral=True)
-        except discord.HTTPException:
-            log.exception("Could not deliver raid component error response")
-
-
-class RosterBrowserView(LoggedView):
+class RosterBrowserView(discord.ui.View):
     def __init__(self, role=None, clazz=None):
         super().__init__(timeout=300)
         self.role = role
@@ -264,16 +183,11 @@ class PublicClassSelect(discord.ui.Select):
     async def callback(self, i):
         await show_browser(i, clazz=self.values[0])
 
-class PublicRosterView(LoggedView):
+class PublicRosterView(discord.ui.View):
     def __init__(self, bot):
         super().__init__(timeout=None)
         self.bot = bot
         self.add_item(PublicClassSelect())
-
-    @discord.ui.button(label="Show All", emoji="📋", style=discord.ButtonStyle.primary, custom_id="greed:raid:show-all", row=0)
-    async def show_all(self, i, button):
-        log.info("Raid Show All clicked: user=%s interaction=%s", i.user.id, i.id)
-        await show_all_roster(i)
 
     @discord.ui.button(label="Tank", style=discord.ButtonStyle.secondary, custom_id="greed:raid:browse:Tank", row=0)
     async def browse_tank(self, i, button):
@@ -341,7 +255,10 @@ class MemberPicker(discord.ui.UserSelect):
             await i.response.send_message("Choose a member of this server.", ephemeral=True)
             return
         self.view.member_id = member.id
-        await i.response.defer()
+        existing = load()["players"].get(str(member.id))
+        self.view.note = existing.get("note") if existing else None
+        self.view.sync_note_button()
+        await i.response.edit_message(view=self.view)
 
 
 class FieldPicker(discord.ui.Select):
@@ -360,7 +277,44 @@ class FieldPicker(discord.ui.Select):
         await i.response.defer()
 
 
-class EditRosterView(LoggedView):
+class NoteModal(discord.ui.Modal):
+    def __init__(self, editor):
+        super().__init__(title="Roster note")
+        self.editor = editor
+        self.note_input = discord.ui.TextInput(
+            label="Note (optional)",
+            placeholder="e.g. Benched this lockout, raid Sundays only",
+            default=editor.note or "",
+            max_length=100,
+            required=False,
+        )
+        self.add_item(self.note_input)
+
+    async def on_submit(self, i):
+        if not permitted(i):
+            await i.response.send_message("Administrators only.", ephemeral=True)
+            return
+        self.editor.note = self.note_input.value.strip() or None
+        self.editor.sync_note_button()
+        await i.response.edit_message(view=self.editor)
+
+
+class NoteButton(discord.ui.Button):
+    def __init__(self, note):
+        super().__init__(
+            label="📝 Edit note" if note else "📝 Add note",
+            style=discord.ButtonStyle.secondary,
+            row=4,
+        )
+
+    async def callback(self, i):
+        if not permitted(i):
+            await i.response.send_message("Administrators only.", ephemeral=True)
+            return
+        await i.response.send_modal(NoteModal(self.view))
+
+
+class EditRosterView(discord.ui.View):
     def __init__(self, bot, removing=False):
         super().__init__(timeout=300)
         self.bot = bot
@@ -369,12 +323,19 @@ class EditRosterView(LoggedView):
         self.clazz = None
         self.main = None
         self.off = "None"
+        self.note = None
         self.designated_off_tank = False
         self.add_item(MemberPicker())
         if not removing:
             self.add_item(FieldPicker("clazz", "Select class", CLASSES, 1))
             self.add_item(FieldPicker("main", "Select main role", ROLES, 2))
             self.add_item(FieldPicker("off", "Select off-spec (optional)", ("None", *ROLES), 3))
+            self.add_item(NoteButton(self.note))
+
+    def sync_note_button(self):
+        for item in self.children:
+            if isinstance(item, NoteButton):
+                item.label = "📝 Edit note" if self.note else "📝 Add note"
 
     @discord.ui.button(label="Designated Off-Tank: NO", style=discord.ButtonStyle.secondary, row=4)
     async def toggle_off_tank(self, i, button):
@@ -414,8 +375,13 @@ class EditRosterView(LoggedView):
             existed = data["players"].pop(uid, None) is not None
             result = "Removed." if existed else "Member was not on the roster."
         else:
+            existing = data["players"].get(uid, {})
             data["players"][uid] = {"class": self.clazz, "main": self.main, "off": self.off,
-                                    "designated_off_tank": self.designated_off_tank}
+                                    "designated_off_tank": self.designated_off_tank,
+                                    "note": self.note,
+                                    "added_by": existing.get("added_by") or str(i.user.id),
+                                    "edited_by": str(i.user.id),
+                                    "edited_at": int(time.time())}
             result = "Roster entry saved."
         data["updated_at"] = int(time.time())
         save(data)
@@ -445,38 +411,31 @@ class RosterView(PublicRosterView):
 
     @discord.ui.button(label="Add / Edit", emoji="✏️", style=discord.ButtonStyle.primary, custom_id="greed:raid:edit", row=2)
     async def edit(self, i, button):
-        log.info("Raid Add/Edit clicked: user=%s interaction=%s guild=%s latency=%.3fs", i.user.id, i.id, i.guild_id, self.bot.latency)
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
             return
         await i.response.send_message(
             "Choose a guild member, class, main role and optional off-spec, then click **Save / Confirm**.",
             view=EditRosterView(self.bot), ephemeral=True)
-        log.info("Raid Add/Edit editor sent: interaction=%s", i.id)
 
     @discord.ui.button(label="Remove", emoji="🗑️", style=discord.ButtonStyle.secondary, custom_id="greed:raid:remove", row=2)
     async def remove(self, i, button):
-        log.info("Raid Remove clicked: user=%s interaction=%s guild=%s latency=%.3fs", i.user.id, i.id, i.guild_id, self.bot.latency)
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
             return
         await i.response.send_message(
             "Select the member to remove, then click **Save / Confirm**.",
             view=EditRosterView(self.bot, removing=True), ephemeral=True)
-        log.info("Raid Remove editor sent: interaction=%s", i.id)
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, custom_id="greed:raid:refresh", row=2)
     async def reload(self, i, button):
-        log.info("Raid Refresh clicked: user=%s interaction=%s guild=%s latency=%.3fs", i.user.id, i.id, i.guild_id, self.bot.latency)
         if not permitted(i):
             await i.response.send_message("Administrators only.", ephemeral=True)
             return
-        await i.response.defer(ephemeral=True, thinking=True)
-        log.info("Raid Refresh acknowledged: interaction=%s", i.id)
+        await i.response.defer(ephemeral=True)
         try:
             updated = await refresh(self.bot, i.guild)
             await i.followup.send("Roster refreshed." if updated else "Use /raid_roster to publish.", ephemeral=True)
-            log.info("Raid Refresh completed: interaction=%s updated=%s", i.id, updated)
         except discord.HTTPException:
             log.exception("Roster refresh failed")
             await i.followup.send("Roster refresh failed. Check bot logs.", ephemeral=True)
@@ -503,21 +462,9 @@ async def ensure_control(bot, guild, setup_id):
     data["control"] = {"channel_id": setup_id, "message_id": message.id}
     save(data)
 
-def register_views(bot):
-    """Register persistent views after login, binding the saved setup message."""
-    view = RosterView(bot)
-    bot.add_view(view)
-    log.info("Registered persistent raid controls (fallback): %s",
-             [(item.type.value, item.custom_id) for item in view.children])
-    state = load().get("control")
-    if state and state.get("message_id"):
-        message_id = int(state["message_id"])
-        bot.add_view(RosterView(bot), message_id=message_id)
-        log.info("Bound raid admin controls to setup message %s", message_id)
-
-
 def register(bot, guild_id, channel_id, setup_id):
-    # Commands are registered at import time; views are bound in setup_hook().
+    bot.add_view(RosterView(bot))
+    bot.add_view(PublicRosterView(bot))
 
     @bot.tree.command(name="raid_roster", description="Publish or refresh the raid roster and browser", guild=discord.Object(id=guild_id))
     @app_commands.default_permissions(administrator=True)
